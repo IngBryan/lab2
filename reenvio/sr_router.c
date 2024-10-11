@@ -83,48 +83,71 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   struct sr_if *myInterface = sr_get_interface_given_ip(sr, targetIP);
 
   
-  if(myInterface==0){//hay que reenviar
+  if(myInterface==0){/*hay que reenviar*/
   
 
   
-  }else{//es para mi
+  }else{/*es para mi*/
     sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
 
-    if(icmp_hdr->icmp_code==0 && icmp_hdr->icmp_type==8){//echo request
+    if(icmp_hdr->icmp_code==0 && icmp_hdr->icmp_type==8){/*echo request*/
 
       if(icmp_hdr->icmp_sum==icmp_cksum(icmp_hdr,sizeof(sr_icmp_hdr_t))){
 
-        //tenemos que responder con un echo reply
+        /*tenemos que responder con un echo reply*/
 
       }
-    }else if(iphdr->ip_p==6 ||iphdr->ip_p==8){
+    }else if(iphdr->ip_p==6 || iphdr->ip_p==8){
 
-      //responder con port unrachable
-      sr_icmp_t3_hdr_t *icmp_t3_hdr_ptr = (sr_icmp_t3_hdr_t *)malloc(sizeof(sr_icmp_t3_hdr_t));
-      icmp_t3_hdr_ptr->icmp_type = 3;            // Por ejemplo, código de destino inalcanzable
-      icmp_t3_hdr_ptr->icmp_code = 3;            // Código específico
-      //icmp_t3_hdr_ptr->unused = 0;               // Campo no utilizado
-      icmp_t3_hdr_ptr->next_mtu = myInterface->next->speed;          
-      icmp_t3_hdr_ptr->icmp_sum =0;
-      memset(icmp_t3_hdr_ptr->data, 0, ICMP_DATA_SIZE); // Inicializar el arreglo de datos
-      icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_hdr,sizeof(sr_icmp_t3_hdr_t));
-
-      int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t);
+      
+      /*responder con port unrachable*/
+      int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE;
       uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
-      sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
 
+      sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
       memcpy(ethHdr->ether_dhost, myInterface->addr, ETHER_ADDR_LEN);
       memcpy(ethHdr->ether_shost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
       ethHdr->ether_type = htons(ethertype_ip);
 
 
-      sr_ip_hdr_t *iphdr_icmp= (struct sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
+      sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
       iphdr_icmp->ip_src=myInterface->ip;
       iphdr_icmp->ip_dst=senderIP;
-      iphdr_icmp->ip_ttl=128;//revisar
+      iphdr_icmp->ip_ttl=128;/*revisar*/
       iphdr_icmp->ip_v=4;
-      iphdr_icmp->ip_id=(uint16_t)(rand() % 65536);//reviar :v
+      iphdr_icmp->ip_id=(uint16_t)(rand() % 65536);/*reviar :v*/
+      iphdr_icmp->ip_hl=5;
+      iphdr_icmp->ip_tos=iphdr->ip_tos;
+      iphdr_icmp->ip_len=sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE+sizeof(sr_icmp_t3_hdr_t);
+      iphdr_icmp->ip_off=IP_DF;
+      iphdr_icmp->ip_p=1;
+      iphdr_icmp->ip_sum=0;
+      iphdr_icmp->ip_sum=ip_cksum(iphdr_icmp,sizeof(sr_ip_hdr_t));
 
+      
+      sr_icmp_t3_hdr_t *icmp_t3_hdr_ptr = (sr_icmp_t3_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
+      icmp_t3_hdr_ptr->icmp_type = 3;            
+      icmp_t3_hdr_ptr->icmp_code = 3;            
+      icmp_t3_hdr_ptr->unused = 0;              
+      icmp_t3_hdr_ptr->next_mtu = myInterface->next->speed;  /*preguntar*/        
+      icmp_t3_hdr_ptr->icmp_sum =0;
+
+      if(iphdr->ip_p==6){
+         uint8_t *tcp_hdr_ptr = packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
+    
+         /* Extrae la longitud de la cabecera TCP*/
+         uint8_t tcp_hdr_len = (tcp_hdr_ptr[12] >> 4) * 4; /*El byte de longitud está en tcp_hdr_ptr[12]*/ 
+
+         /*Copia los datos al mensaje ICMP Type 3*/ 
+         memcpy(icmp_t3_hdr_ptr->data, tcp_hdr_ptr + tcp_hdr_len,  ICMP_DATA_SIZE);
+      }
+      else{
+        memcpy(icmp_t3_hdr_ptr->data,packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+8, ICMP_DATA_SIZE);
+      }
+      
+      icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
+      sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,myInterface->name);
+      /*borrar paquete*/
 
     }
 
