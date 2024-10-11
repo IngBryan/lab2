@@ -68,6 +68,71 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         char *interface /* lent */,
         sr_ethernet_hdr_t *eHdr) {
 
+
+  printf("*** -> It is an IP packet. Print IP header.\n");
+  print_hdr_ip(packet + sizeof(sr_ethernet_hdr_t));
+
+  sr_ip_hdr_t *iphdr = (sr_ip_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
+
+
+  /* Obtengo las direcciones IP */
+  uint32_t senderIP = iphdr->ip_src;
+  uint32_t targetIP = iphdr->ip_dst;
+  
+
+  struct sr_if *myInterface = sr_get_interface_given_ip(sr, targetIP);
+
+  
+  if(myInterface==0){//hay que reenviar
+  
+
+  
+  }else{//es para mi
+    sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
+
+    if(icmp_hdr->icmp_code==0 && icmp_hdr->icmp_type==8){//echo request
+
+      if(icmp_hdr->icmp_sum==icmp_cksum(icmp_hdr,sizeof(sr_icmp_hdr_t))){
+
+        //tenemos que responder con un echo reply
+
+      }
+    }else if(iphdr->ip_p==6 ||iphdr->ip_p==8){
+
+      //responder con port unrachable
+      sr_icmp_t3_hdr_t *icmp_t3_hdr_ptr = (sr_icmp_t3_hdr_t *)malloc(sizeof(sr_icmp_t3_hdr_t));
+      icmp_t3_hdr_ptr->icmp_type = 3;            // Por ejemplo, código de destino inalcanzable
+      icmp_t3_hdr_ptr->icmp_code = 3;            // Código específico
+      //icmp_t3_hdr_ptr->unused = 0;               // Campo no utilizado
+      icmp_t3_hdr_ptr->next_mtu = myInterface->next->speed;          
+      icmp_t3_hdr_ptr->icmp_sum =0;
+      memset(icmp_t3_hdr_ptr->data, 0, ICMP_DATA_SIZE); // Inicializar el arreglo de datos
+      icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_hdr,sizeof(sr_icmp_t3_hdr_t));
+
+      int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t);
+      uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
+      sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
+
+      memcpy(ethHdr->ether_dhost, myInterface->addr, ETHER_ADDR_LEN);
+      memcpy(ethHdr->ether_shost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
+      ethHdr->ether_type = htons(ethertype_ip);
+
+
+      sr_ip_hdr_t *iphdr_icmp= (struct sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
+      iphdr_icmp->ip_src=myInterface->ip;
+      iphdr_icmp->ip_dst=senderIP;
+      iphdr_icmp->ip_ttl=128;//revisar
+      iphdr_icmp->ip_v=4;
+      iphdr_icmp->ip_id=(uint16_t)(rand() % 65536);//reviar :v
+
+
+    }
+
+  }
+
+
+
+
   /* 
   * COLOQUE ASÍ SU CÓDIGO
   * SUGERENCIAS: 
