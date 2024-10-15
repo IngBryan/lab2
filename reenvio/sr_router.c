@@ -80,33 +80,32 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   uint32_t targetIP = iphdr->ip_dst;
   
 
-  struct sr_if *myInterface = sr_get_interface_given_ip(sr, targetIP);
+  struct sr_if *myInterface = sr_get_interface_given_ip(sr, ntohl(targetIP));/*La ip viene al revez wtf */
 
   
   if(myInterface==0){/*hay que reenviar*/
   
 
-  
   }else{/*es para mi*/
-    sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
+    
 
-    if(icmp_hdr->icmp_code==0 && icmp_hdr->icmp_type==8){/*echo request*/
-
+    if(iphdr->ip_p==1){/*paquete ICMP*/
+      sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
       if(icmp_hdr->icmp_sum==icmp_cksum(icmp_hdr,sizeof(sr_icmp_hdr_t))){
 
         /*tenemos que responder con un echo reply*/
 
       }
-    }else if(iphdr->ip_p==6 || iphdr->ip_p==8){
+    }else if(iphdr->ip_p==6 || iphdr->ip_p==17){
 
       
       /*responder con port unrachable*/
-      int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE;
+      unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE;
       uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
 
       sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
-      memcpy(ethHdr->ether_dhost, myInterface->addr, ETHER_ADDR_LEN);
-      memcpy(ethHdr->ether_shost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
+      memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
+      memcpy(ethHdr->ether_dhost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
       ethHdr->ether_type = htons(ethertype_ip);
 
 
@@ -129,7 +128,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       icmp_t3_hdr_ptr->icmp_type = 3;            
       icmp_t3_hdr_ptr->icmp_code = 3;            
       icmp_t3_hdr_ptr->unused = 0;              
-      icmp_t3_hdr_ptr->next_mtu = myInterface->next->speed;  /*preguntar*/        
+      icmp_t3_hdr_ptr->next_mtu = 0  /*preguntar*/        
       icmp_t3_hdr_ptr->icmp_sum =0;
 
       if(iphdr->ip_p==6){
@@ -153,8 +152,6 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     }
 
   }
-
-
 
 
   /* 
