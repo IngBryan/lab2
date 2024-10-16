@@ -80,7 +80,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   uint32_t targetIP = iphdr->ip_dst;
   
 
-  struct sr_if *myInterface = sr_get_interface_given_ip(sr, ntohl(targetIP));/*La ip viene al revez wtf */
+  struct sr_if *myInterface = sr_get_interface_given_ip(sr, targetIP);
 
   
   if(myInterface==0){/*hay que reenviar*/
@@ -114,11 +114,11 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       iphdr_icmp->ip_dst=senderIP;
       iphdr_icmp->ip_ttl=128;/*revisar*/
       iphdr_icmp->ip_v=4;
-      iphdr_icmp->ip_id=(uint16_t)(rand() % 65536);/*reviar :v*/
+      iphdr_icmp->ip_id=htons((uint16_t)(rand() % 65536));/*revisar :v*/
       iphdr_icmp->ip_hl=5;
       iphdr_icmp->ip_tos=iphdr->ip_tos;
-      iphdr_icmp->ip_len=sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE+sizeof(sr_icmp_t3_hdr_t);
-      iphdr_icmp->ip_off=IP_DF;
+      iphdr_icmp->ip_len=htons(sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE+sizeof(sr_icmp_t3_hdr_t));
+      iphdr_icmp->ip_off=0;
       iphdr_icmp->ip_p=1;
       iphdr_icmp->ip_sum=0;
       iphdr_icmp->ip_sum=ip_cksum(iphdr_icmp,sizeof(sr_ip_hdr_t));
@@ -128,7 +128,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       icmp_t3_hdr_ptr->icmp_type = 3;            
       icmp_t3_hdr_ptr->icmp_code = 3;            
       icmp_t3_hdr_ptr->unused = 0;              
-      icmp_t3_hdr_ptr->next_mtu = 0  /*preguntar*/        
+      icmp_t3_hdr_ptr->next_mtu = 0;  /*preguntar*/        
       icmp_t3_hdr_ptr->icmp_sum =0;
 
       if(iphdr->ip_p==6){
@@ -145,7 +145,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       }
       
       icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
-      print_hdrs(icmp_Packet,icmp_pqtLenght);//agregue esto
+      print_hdrs(icmp_Packet,icmp_pqtLenght);/*agregue esto*/
       sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,myInterface->name);
       /*borrar paquete*/
 
