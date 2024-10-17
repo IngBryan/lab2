@@ -100,7 +100,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
       
       /*responder con port unrachable*/
-      unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE;
+      unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t);
       uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
 
       sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
@@ -112,12 +112,12 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
       iphdr_icmp->ip_src=myInterface->ip;
       iphdr_icmp->ip_dst=senderIP;
-      iphdr_icmp->ip_ttl=128;/*revisar*/
+      iphdr_icmp->ip_ttl=64;/*numero que usa linux*/
       iphdr_icmp->ip_v=4;
-      iphdr_icmp->ip_id=htons((uint16_t)(rand() % 65536));/*revisar :v*/
+      iphdr_icmp->ip_id=0;
       iphdr_icmp->ip_hl=5;
       iphdr_icmp->ip_tos=iphdr->ip_tos;
-      iphdr_icmp->ip_len=htons(sizeof(sr_ip_hdr_t)+ICMP_DATA_SIZE+sizeof(sr_icmp_t3_hdr_t));
+      iphdr_icmp->ip_len=htons(sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t));
       iphdr_icmp->ip_off=0;
       iphdr_icmp->ip_p=1;
       iphdr_icmp->ip_sum=0;
@@ -128,21 +128,11 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       icmp_t3_hdr_ptr->icmp_type = 3;            
       icmp_t3_hdr_ptr->icmp_code = 3;            
       icmp_t3_hdr_ptr->unused = 0;              
-      icmp_t3_hdr_ptr->next_mtu = 0;  /*preguntar*/        
+      icmp_t3_hdr_ptr->next_mtu = 0;        
       icmp_t3_hdr_ptr->icmp_sum =0;
 
-      if(iphdr->ip_p==6){
-         uint8_t *tcp_hdr_ptr = packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
-    
-         /* Extrae la longitud de la cabecera TCP*/
-         uint8_t tcp_hdr_len = (tcp_hdr_ptr[12] >> 4) * 4; /*El byte de longitud está en tcp_hdr_ptr[12]*/ 
-
-         /*Copia los datos al mensaje ICMP Type 3*/ 
-         memcpy(icmp_t3_hdr_ptr->data, tcp_hdr_ptr + tcp_hdr_len,  ICMP_DATA_SIZE);
-      }
-      else{
-        memcpy(icmp_t3_hdr_ptr->data,packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+8, ICMP_DATA_SIZE);
-      }
+      memcpy(icmp_t3_hdr_ptr->data,packet+sizeof(sr_ethernet_hdr_t),20);/*copio la cabecera ip*/
+      memcpy((icmp_t3_hdr_ptr->data)+20,packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t), 8);
       
       icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
       print_hdrs(icmp_Packet,icmp_pqtLenght);/*agregue esto*/
@@ -152,8 +142,6 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     }
 
   }
-
-
   /* 
   * COLOQUE ASÍ SU CÓDIGO
   * SUGERENCIAS: 
