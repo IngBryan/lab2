@@ -87,15 +87,29 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   
 
   }else{/*es para mi*/
-    
-
     if(iphdr->ip_p==1){/*paquete ICMP*/
       sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
-      if(icmp_hdr->icmp_sum==icmp_cksum(icmp_hdr,sizeof(sr_icmp_hdr_t))){
+      /*El paquete ya es valido no es necesario chequear cheksum*/
+      if(icmp_hdr->icmp_type==8){
 
-        /*tenemos que responder con un echo reply*/
+        sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) packet;
+        memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
+        memcpy(ethHdr->ether_dhost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
+        ethHdr->ether_type = htons(ethertype_ip);
+        uint32_t destino=iphdr->ip_src;
+        iphdr->ip_src=myInterface->ip;
+        iphdr->ip_dst=destino;
+        iphdr->ip_sum=0;
+        iphdr->ip_sum=ip_cksum(iphdr,sizeof(sr_ip_hdr_t));
+        iphdr->ip_ttl=64;
+        icmp_hdr->icmp_type=0;
+        icmp_hdr->icmp_sum=0;
+        icmp_hdr->icmp_sum= cksum(icmp_hdr,len-sizeof(sr_ip_hdr_t)-sizeof(sr_ethernet_hdr_t));
+        print_hdrs(packet,len);
+        sr_send_packet(sr,packet,len,myInterface->name);
 
       }
+
     }else if(iphdr->ip_p==6 || iphdr->ip_p==17){
 
       
@@ -116,7 +130,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       iphdr_icmp->ip_v=4;
       iphdr_icmp->ip_id=0;
       iphdr_icmp->ip_hl=5;
-      iphdr_icmp->ip_tos=iphdr->ip_tos;
+      iphdr_icmp->ip_tos=0;
       iphdr_icmp->ip_len=htons(sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t));
       iphdr_icmp->ip_off=0;
       iphdr_icmp->ip_p=1;
@@ -139,6 +153,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,myInterface->name);
       /*borrar paquete*/
 
+    }
+    else{
+      /*??????????*/
     }
 
   }
