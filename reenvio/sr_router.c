@@ -94,9 +94,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
 
 
-   }else{
+   }else{/*MANDAR ICMP NET UNRACHABLE*/
 
-    
+
    }
 
 
