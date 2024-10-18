@@ -84,7 +84,21 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
   
   if(myInterface==0){/*hay que reenviar*/
-  
+
+   struct sr_rt* aux=sr->routing_table;
+   while(aux!=NULL && (aux->mask &targetIP)!=aux->in_addr){
+
+    aux=aux->next;
+   }
+   if(aux!=NULL){/*TENGO QUE REENVIAR*/
+
+
+
+   }else{
+
+    
+   }
+
 
   }else{/*es para mi*/
     if(iphdr->ip_p==1){/*paquete ICMP*/
@@ -151,7 +165,8 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
       print_hdrs(icmp_Packet,icmp_pqtLenght);/*agregue esto*/
       sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,myInterface->name);
-      /*borrar paquete*/
+      free(icmp_Packet);
+      icmp_Packet=NULL;
 
     }
     else{
