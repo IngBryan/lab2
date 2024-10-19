@@ -81,16 +81,15 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   
 
   struct sr_if *myInterface = sr_get_interface_given_ip(sr, targetIP);
-
   
   if(myInterface==0){/*hay que reenviar*/
 
-   struct sr_rt* aux=sr->routing_table;
-   while(aux!=NULL && (aux->mask &targetIP)!=aux->in_addr){
+   struct sr_rt* iter=sr->routing_table;
+   while(iter!=NULL && (iter->mask.s_addr & targetIP)!=iter->dest.s_addr){
 
-    aux=aux->next;
+    iter=iter->next;
    }
-   if(aux!=NULL){/*TENGO QUE REENVIAR*/
+   if(iter!=NULL){/*TENGO QUE REENVIAR*/
 
 
 
