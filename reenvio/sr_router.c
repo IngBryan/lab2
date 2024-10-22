@@ -93,33 +93,54 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       /*tengo la interfaz de salida del datagrama en iter*/
       /*Disminuir el ttl*/
       iphdr->ip_ttl-= 1;
-      /*volver a calcular el checksum */
-      iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t)); 
-      /*Conseguir interfaz de salida*/
-      struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,targetIP); /* liberar */
-      print_hdrs(iphdr,iphdr->ip_len);
-      if (entry != NULL) { /*si está en la cache*/
-        /*reenviarlo al siguiente salto*/
-        printf("ESTA EN CACHE, REENVIO\n");
-        sr_send_packet(sr,packet,len,entry->mac);
-      } else { /*si no está*/
-        printf("NO ESTA EN CACHE, ARP REQUEST\n");
-        /*agrego el paquete a la cola de hasta que se resuelva el
-        ARP y obtengo el request*/
-        struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, targetIP, packet, len, rt_entry->interface);
-        /* paso el request a la función que decide cuando se debe
-        enviar */
-        handle_arpreq(sr, req);
+      /*controlar ttl == 0*/
+      if (iphdr->ip_ttl == 0){
+        /*responder icmp time exceed*/
+      } else {
+        sr_ethernet_hdr_t *ethHdr=(struct sr_ethernet_hdr *)packet;
+        
+        /*volver a calcular el checksum */
+        iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t)); 
+        /*Conseguir interfaz de salida*/
+        struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,targetIP); /* liberar */
+        print_hdrs(iphdr,iphdr->ip_len);
+        if (entry != NULL) { /*si está en la cache*/
+          /*reenviarlo al siguiente salto*/
+          printf("ESTA EN CACHE, REENVIO\n");
+          memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
+          memcpy(ethHdr->ether_dhost, entry->mac, /*sizeof(uint8_t) */ETHER_ADDR_LEN);
+          ethHdr->ether_type = htons(ethertype_ip);  
+          
+          sr_send_packet(sr,packet,len,rt_entry->interface);
+        } else { /*si no está*/
+          printf("NO ESTA EN CACHE, ARP REQUEST\n");
+          /*agrego el paquete a la cola de hasta que se resuelva el
+          ARP y obtengo el request*/
+          struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, targetIP, packet, len, rt_entry->interface);
+          /* paso el request a la función que decide cuando se debe
+          enviar */
+          handle_arpreq(sr, req);
+          entry=sr_arpcache_lookup(&(sr->cache), targetIP);   
+          if (entry != NULL) {
+            memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
+            memcpy(ethHdr->ether_dhost, entry->mac, /*sizeof(uint8_t) */ETHER_ADDR_LEN);
+            ethHdr->ether_type = htons(ethertype_ip);  
+          
+            sr_send_packet(sr,packet,len,rt_entry->interface);
+          }
+          /*como seguir*/
       }
       free(packet);
       free(entry);
+      }
+      
    }else{/*SINO MANDAR ICMP NET UNRACHABLE*/
       unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t);
       uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
 
       sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
       memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
-      memcpy(ethHdr->ether_dhost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
+      memcpy(ethHdr->ether_dhost, srcAddr, /*sizeof(uint8_t) */ETHER_ADDR_LEN);
       ethHdr->ether_type = htons(ethertype_ip);
 
 
@@ -164,7 +185,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       if(icmp_hdr->icmp_type==8){ /* si es echo request respondo echo reply*/
         sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) packet;
         memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
-        memcpy(ethHdr->ether_dhost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
+        memcpy(ethHdr->ether_dhost, srcAddr, /*sizeof(uint8_t) */ETHER_ADDR_LEN);
         ethHdr->ether_type = htons(ethertype_ip);
         uint32_t destino=iphdr->ip_src;
         iphdr->ip_src=myInterface->ip;
@@ -187,7 +208,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
       sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
       memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
-      memcpy(ethHdr->ether_dhost, srcAddr, sizeof(uint8_t) *ETHER_ADDR_LEN);
+      memcpy(ethHdr->ether_dhost, srcAddr, /*sizeof(uint8_t) */ETHER_ADDR_LEN); 
       ethHdr->ether_type = htons(ethertype_ip);
 
 
