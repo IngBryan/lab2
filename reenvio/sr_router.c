@@ -63,8 +63,10 @@ void sr_send_icmp_error_packet(uint8_t type,
     rt_entry=rt_entry->next;
    }
    printf("Tiene que salir por la siguiente interfaz:\n");
-   struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);
+   struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*Esto hay que revisarlo Mandar udp a interfaces intermedias*/
    struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,ipDst);
+   uint32_t arp_ip_target = (rt_entry->gw.s_addr == 0) ? ipDst : rt_entry->gw.s_addr;
+
   sr_print_if(iface);
   if(type==3){
     unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t);
@@ -110,8 +112,8 @@ void sr_send_icmp_error_packet(uint8_t type,
 
     }else{
       printf("La MAC NO esta en cache\n");
-      struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, rt_entry->gw.s_addr, icmp_Packet, icmp_pqtLenght, rt_entry->interface);
-      /*ARREGLAR ESTE ERROR*/
+      struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, arp_ip_target, icmp_Packet, icmp_pqtLenght, rt_entry->interface);
+      /*Cambie ip_dst por arp_ip_target */
       handle_arpreq(sr, req);
     
     
@@ -180,9 +182,11 @@ void sr_handle_ip_packet(struct sr_instance *sr,
           free(entry);
         } else { /*si no está*/
           printf("NO ESTA EN CACHE, ARP REQUEST\n");
+          uint32_t arp_ip_target = (rt_entry->gw.s_addr == 0) ? targetIP : rt_entry->gw.s_addr;
           /*agrego el paquete a la cola de hasta que se resuelva el
           ARP y obtengo el request*/
-          struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, rt_entry->gw.s_addr, packet, len, rt_entry->interface);
+          struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, arp_ip_target, packet, len, rt_entry->interface);/*Mismo cambio */
+
           /* paso el request a la función que decide cuando se debe
           enviar */
           handle_arpreq(sr, req);
