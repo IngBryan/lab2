@@ -63,18 +63,19 @@ void sr_send_icmp_error_packet(uint8_t type,
     rt_entry=rt_entry->next;
    }
    printf("Tiene que salir por la siguiente interfaz:\n");
-   struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*Esto hay que revisarlo Mandar udp a interfaces intermedias*/
+   struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/
    struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,ipDst);
+
    uint32_t arp_ip_target = (rt_entry->gw.s_addr == 0) ? ipDst : rt_entry->gw.s_addr;
 
   sr_print_if(iface);
-  if(type==3){
+  if(type==3){/*Port unrachable*/
     unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t);
     uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
-
+    sr_ip_hdr_t *ip_packet=(sr_ip_hdr_t *)(ipPacket);
 
     sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
-    iphdr_icmp->ip_src=iface->ip;
+    iphdr_icmp->ip_src=ip_packet->ip_dst;
     iphdr_icmp->ip_dst=ipDst;
     iphdr_icmp->ip_ttl=64;/*numero que usa linux*/
     iphdr_icmp->ip_v=4;
@@ -96,7 +97,7 @@ void sr_send_icmp_error_packet(uint8_t type,
     memcpy(icmp_t3_hdr_ptr->data,ipPacket,20);/*copio la cabecera ip*/
     memcpy((icmp_t3_hdr_ptr->data)+20,ipPacket+sizeof(sr_ip_hdr_t), 8);
     icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
-    print_hdrs(icmp_Packet,icmp_pqtLenght);/*agregue esto*/
+    
 
 
     sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
@@ -109,23 +110,29 @@ void sr_send_icmp_error_packet(uint8_t type,
       
       sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,rt_entry->interface);
       free(entry);
-
+      print_hdrs(icmp_Packet,icmp_pqtLenght);
     }else{
       printf("La MAC NO esta en cache\n");
       struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, arp_ip_target, icmp_Packet, icmp_pqtLenght, rt_entry->interface);
       /*Cambie ip_dst por arp_ip_target */
       handle_arpreq(sr, req);
     
-    
     }
+    
   }else if(type==11){
 
-  }else if(type==8){
-      
   }
   
 } /* -- sr_send_icmp_error_packet -- */
-
+  /* 
+  * SUGERENCIAS: 
+  * - Obtener el cabezal IP y direcciones 
+  * - Verificar si el paquete es para una de mis interfaces o si hay una coincidencia en mi tabla de enrutamiento 
+  * - Si no es para una de mis interfaces y no hay coincidencia en la tabla de enrutamiento, enviar ICMP net unreachable
+  * - Sino, si es para mí, verificar si es un paquete ICMP echo request y responder con un echo reply 
+  * - Sino, verificar TTL, ARP y reenviar si corresponde (puede necesitar una solicitud ARP y esperar la respuesta)
+  * - No olvide imprimir los mensajes de depuración
+  */
 void sr_handle_ip_packet(struct sr_instance *sr,
         uint8_t *packet /* lent */,
         unsigned int len,
@@ -154,25 +161,26 @@ void sr_handle_ip_packet(struct sr_instance *sr,
    while(rt_entry!=NULL && (rt_entry->mask.s_addr & targetIP)!=rt_entry->dest.s_addr){
 
     rt_entry=rt_entry->next;
-   }
+   }/*Buscamos entrada en la tabla de ruteo*/
+   
    if(rt_entry!=NULL){/*SI ENCONTRE PREFIJO TENGO QUE REENVIAR*/
       /*tengo la interfaz de salida del datagrama en iter*/
       /*Disminuir el ttl*/
-      iphdr->ip_ttl-= 1;
-      /*controlar ttl == 0*/
-      if (iphdr->ip_ttl == 0){
-        /*responder icmp time exceed*/
+      
+      if (iphdr->ip_ttl-1 == 0){
+        
+        sr_send_icmp_error_packet(11,0,sr,senderIP,packet + sizeof(sr_ethernet_hdr_t));
+        
       } else {
         sr_ethernet_hdr_t *ethHdr=(struct sr_ethernet_hdr *)packet;
         struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);
-        /*volver a calcular el checksum */
-        iphdr->ip_sum=0;
-        iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t)); 
-        /*Conseguir interfaz de salida*/
         struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,targetIP);
         print_hdrs(packet,len);
         if (entry != NULL) { /*si está en la cache*/
           /*reenviarlo al siguiente salto*/
+          iphdr->ip_ttl-= 1;
+          iphdr->ip_sum=0;
+          iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t));
           printf("ESTA EN CACHE, REENVIO\n");
           memcpy(ethHdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
           memcpy(ethHdr->ether_dhost, entry->mac, /*sizeof(uint8_t) */ETHER_ADDR_LEN);
@@ -194,48 +202,10 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       }
       
     }else{/*SINO MANDAR ICMP NET UNRACHABLE*/
-      /*unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t);
-      uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
 
-      sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
-      memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
-      memcpy(ethHdr->ether_dhost, srcAddr, ETHER_ADDR_LEN);
-      ethHdr->ether_type = htons(ethertype_ip);
-
-
-      sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
-      iphdr_icmp->ip_src=myInterface->ip;
-      iphdr_icmp->ip_dst=senderIP;
-      iphdr_icmp->ip_ttl=64;
-      iphdr_icmp->ip_v=4;
-      iphdr_icmp->ip_id=0;
-      iphdr_icmp->ip_hl=5;
-      iphdr_icmp->ip_tos=0;
-      iphdr_icmp->ip_len=htons(sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t));
-      iphdr_icmp->ip_off=0;
-      iphdr_icmp->ip_p=1;
-      iphdr_icmp->ip_sum=0;
-      iphdr_icmp->ip_sum=ip_cksum(iphdr_icmp,sizeof(sr_ip_hdr_t));
-
-      
-      sr_icmp_t3_hdr_t *icmp_t3_hdr_ptr = (sr_icmp_t3_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
-      icmp_t3_hdr_ptr->icmp_type = 3;            
-      icmp_t3_hdr_ptr->icmp_code = 0;            
-      icmp_t3_hdr_ptr->unused = 0;              
-      icmp_t3_hdr_ptr->next_mtu = 0;        
-      icmp_t3_hdr_ptr->icmp_sum =0;
-
-      memcpy(icmp_t3_hdr_ptr->data,packet+sizeof(sr_ethernet_hdr_t),20);
-      memcpy((icmp_t3_hdr_ptr->data)+20,packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t), 8);
-      
-      icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
-      print_hdrs(icmp_Packet,icmp_pqtLenght);
-      sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,myInterface->name);
-      free(icmp_Packet);
-      icmp_Packet=NULL;*/
       sr_send_icmp_error_packet(3,0,sr,senderIP,packet+sizeof(sr_ethernet_hdr_t));
 
-   }
+    }
 
 
   }else{/*es para mi*/
@@ -243,82 +213,62 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
       /*El paquete ya es valido no es necesario chequear cheksum*/
       if(icmp_hdr->icmp_type==8){ /* si es echo request respondo echo reply*/
-        sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) packet;
-        memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
-        memcpy(ethHdr->ether_dhost, srcAddr, /*sizeof(uint8_t) */ETHER_ADDR_LEN);
-        ethHdr->ether_type = htons(ethertype_ip);
-        uint32_t destino=iphdr->ip_src;
-        iphdr->ip_src=myInterface->ip;
-        iphdr->ip_dst=destino;
-        iphdr->ip_sum=0;
-        iphdr->ip_sum=ip_cksum(iphdr,sizeof(sr_ip_hdr_t));
-        iphdr->ip_ttl=64;
-        icmp_hdr->icmp_type=0;
-        icmp_hdr->icmp_sum=0;
-        icmp_hdr->icmp_sum= cksum(icmp_hdr,len-sizeof(sr_ip_hdr_t)-sizeof(sr_ethernet_hdr_t));
-        print_hdrs(packet,len);
-        sr_send_packet(sr,packet,len,myInterface->name);
 
+        struct sr_rt* rt_entry=sr->routing_table;
+        while(rt_entry!=NULL && (rt_entry->mask.s_addr & senderIP)!=rt_entry->dest.s_addr){
+
+        rt_entry=rt_entry->next;
+
+        }/*Buscamos entrada en la tabla de ruteo*/
+        if(rt_entry!=NULL){
+
+
+          iphdr->ip_src=myInterface->ip;
+          iphdr->ip_dst=senderIP;
+          iphdr->ip_sum=0;
+          iphdr->ip_sum=ip_cksum(iphdr,sizeof(sr_ip_hdr_t));
+          iphdr->ip_ttl=64;
+          icmp_hdr->icmp_type=0;
+          icmp_hdr->icmp_sum=0;
+          icmp_hdr->icmp_sum= cksum(icmp_hdr,len-sizeof(sr_ip_hdr_t)-sizeof(sr_ethernet_hdr_t));
+
+          struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,senderIP);
+          if (entry != NULL) {
+            sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) packet;
+            
+            struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/
+            
+            memcpy(ethHdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
+            memcpy(ethHdr->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+            ethHdr->ether_type = htons(ethertype_ip);
+            print_hdrs(packet,len);
+            sr_send_packet(sr,packet,len,iface->name);
+            free(entry);
+
+          }else{
+            uint32_t arp_ip_target = (rt_entry->gw.s_addr == 0) ? senderIP : rt_entry->gw.s_addr;
+
+            struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, arp_ip_target, packet, len, rt_entry->interface);
+
+            handle_arpreq(sr, req);
+          }
+        }else{
+          /*No se enrutar la respuesta*/
+          sr_send_icmp_error_packet(3,0,sr,senderIP,packet+sizeof(sr_ethernet_hdr_t));
+        }
+       
       }
 
     }else if(iphdr->ip_p==6 || iphdr->ip_p==17){ /* Si es tcp o udp respondo port unrecheable*/
 
-      /*unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t);
-      uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
-
-      sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
-      memcpy(ethHdr->ether_shost, myInterface->addr, ETHER_ADDR_LEN);
-      memcpy(ethHdr->ether_dhost, srcAddr, ETHER_ADDR_LEN); 
-      ethHdr->ether_type = htons(ethertype_ip);
-
-
-      sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
-      iphdr_icmp->ip_src=myInterface->ip;
-      iphdr_icmp->ip_dst=senderIP;
-      iphdr_icmp->ip_ttl=64;
-      iphdr_icmp->ip_v=4;
-      iphdr_icmp->ip_id=0;
-      iphdr_icmp->ip_hl=5;
-      iphdr_icmp->ip_tos=0;
-      iphdr_icmp->ip_len=htons(sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t));
-      iphdr_icmp->ip_off=0;
-      iphdr_icmp->ip_p=1;
-      iphdr_icmp->ip_sum=0;
-      iphdr_icmp->ip_sum=ip_cksum(iphdr_icmp,sizeof(sr_ip_hdr_t));
-
-      
-      sr_icmp_t3_hdr_t *icmp_t3_hdr_ptr = (sr_icmp_t3_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
-      icmp_t3_hdr_ptr->icmp_type = 3;            
-      icmp_t3_hdr_ptr->icmp_code = 3;            
-      icmp_t3_hdr_ptr->unused = 0;              
-      icmp_t3_hdr_ptr->next_mtu = 0;        
-      icmp_t3_hdr_ptr->icmp_sum =0;
-
-      memcpy(icmp_t3_hdr_ptr->data,packet+sizeof(sr_ethernet_hdr_t),20);
-      memcpy((icmp_t3_hdr_ptr->data)+20,packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t), 8);
-      
-      icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
-      print_hdrs(icmp_Packet,icmp_pqtLenght);
-      sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,myInterface->name);
-      free(icmp_Packet);
-      icmp_Packet=NULL;*/
       sr_send_icmp_error_packet(3,3,sr,senderIP,packet+sizeof(sr_ethernet_hdr_t));
     }
     else{
-      /*??????????*/
+      printf("Paquete dropeado\n");
     }
 
   }
-  /* 
-  * COLOQUE ASÍ SU CÓDIGO
-  * SUGERENCIAS: 
-  * - Obtener el cabezal IP y direcciones 
-  * - Verificar si el paquete es para una de mis interfaces o si hay una coincidencia en mi tabla de enrutamiento 
-  * - Si no es para una de mis interfaces y no hay coincidencia en la tabla de enrutamiento, enviar ICMP net unreachable
-  * - Sino, si es para mí, verificar si es un paquete ICMP echo request y responder con un echo reply 
-  * - Sino, verificar TTL, ARP y reenviar si corresponde (puede necesitar una solicitud ARP y esperar la respuesta)
-  * - No olvide imprimir los mensajes de depuración
-  */
+
 
 }
 
