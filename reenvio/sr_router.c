@@ -72,8 +72,8 @@ void sr_send_icmp_error_packet(uint8_t type,
   if(type==3){/*Port unrachable*/
     unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t);
     uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
+    
     sr_ip_hdr_t *ip_packet=(sr_ip_hdr_t *)(ipPacket);
-
     sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
     iphdr_icmp->ip_src=ip_packet->ip_dst;
     iphdr_icmp->ip_dst=ipDst;
@@ -121,6 +121,53 @@ void sr_send_icmp_error_packet(uint8_t type,
     
   }else if(type==11){
 
+    unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t);
+    uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
+    
+    sr_ip_hdr_t *ip_packet=(sr_ip_hdr_t *)(ipPacket);
+    sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
+    iphdr_icmp->ip_src=ip_packet->ip_dst;
+    iphdr_icmp->ip_dst=ipDst;
+    iphdr_icmp->ip_ttl=64;/*numero que usa linux*/
+    iphdr_icmp->ip_v=4;
+    iphdr_icmp->ip_id=0;
+    iphdr_icmp->ip_hl=5;
+    iphdr_icmp->ip_tos=0;
+    iphdr_icmp->ip_len=htons(sizeof(sr_ip_hdr_t)+sizeof(sr_icmp_t3_hdr_t));
+    iphdr_icmp->ip_off=0;
+    iphdr_icmp->ip_p=1;
+    iphdr_icmp->ip_sum=0;
+    iphdr_icmp->ip_sum=ip_cksum(iphdr_icmp,sizeof(sr_ip_hdr_t));
+
+    sr_icmp_t3_hdr_t *icmp_t3_hdr_ptr = (sr_icmp_t3_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
+    icmp_t3_hdr_ptr->icmp_type = type;            
+    icmp_t3_hdr_ptr->icmp_code = code;            
+    icmp_t3_hdr_ptr->unused = 0;              
+    icmp_t3_hdr_ptr->next_mtu = 0;        
+    icmp_t3_hdr_ptr->icmp_sum =0;
+    memcpy(icmp_t3_hdr_ptr->data,ipPacket,20);/*copio la cabecera ip*/
+    memcpy((icmp_t3_hdr_ptr->data)+20,ipPacket+sizeof(sr_ip_hdr_t), 8);
+    icmp_t3_hdr_ptr->icmp_sum = icmp3_cksum(icmp_t3_hdr_ptr,sizeof(sr_icmp_t3_hdr_t));
+
+    sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
+    ethHdr->ether_type = htons(ethertype_ip);
+    if(entry!=NULL){/*Esta en cache*/
+      printf("La MAC esta en cache\n");
+      
+      memcpy(ethHdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
+      memcpy(ethHdr->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+      
+      sr_send_packet(sr,icmp_Packet,icmp_pqtLenght,rt_entry->interface);
+      free(entry);
+      print_hdrs(icmp_Packet,icmp_pqtLenght);
+    }else{
+      printf("La MAC NO esta en cache\n");
+      struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, arp_ip_target, icmp_Packet, icmp_pqtLenght, rt_entry->interface);
+      handle_arpreq(sr, req);
+    
+    }
+
+
   }
   
 } /* -- sr_send_icmp_error_packet -- */
@@ -166,27 +213,30 @@ void sr_handle_ip_packet(struct sr_instance *sr,
    if(rt_entry!=NULL){/*SI ENCONTRE PREFIJO TENGO QUE REENVIAR*/
       /*tengo la interfaz de salida del datagrama en iter*/
       /*Disminuir el ttl*/
-      
       if (iphdr->ip_ttl-1 == 0){
-        
-        sr_send_icmp_error_packet(11,0,sr,senderIP,packet + sizeof(sr_ethernet_hdr_t));
+        struct sr_if *myInterface = sr_get_interface(sr,interface);
+        sr_send_icmp_error_packet(11,0,sr,myInterface->ip,packet + sizeof(sr_ethernet_hdr_t));
         
       } else {
+        
         sr_ethernet_hdr_t *ethHdr=(struct sr_ethernet_hdr *)packet;
-        struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);
+        struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*Interfaz de salida*/
         struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,targetIP);
+        iphdr->ip_ttl-= 1;
+        iphdr->ip_sum=0;
+        iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t));
         print_hdrs(packet,len);
         if (entry != NULL) { /*si está en la cache*/
-          /*reenviarlo al siguiente salto*/
-          iphdr->ip_ttl-= 1;
-          iphdr->ip_sum=0;
-          iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t));
-          printf("ESTA EN CACHE, REENVIO\n");
-          memcpy(ethHdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
-          memcpy(ethHdr->ether_dhost, entry->mac, /*sizeof(uint8_t) */ETHER_ADDR_LEN);
-          ethHdr->ether_type = htons(ethertype_ip);  
           
+          printf("ESTA EN CACHE, REENVIO\n");
+
+          memcpy(ethHdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
+          memcpy(ethHdr->ether_dhost, entry->mac,ETHER_ADDR_LEN);
+          ethHdr->ether_type = htons(ethertype_ip);  
+          printf("Paquete a reenviar\n");
+          print_hdrs(packet,len);
           sr_send_packet(sr,packet,len,rt_entry->interface);
+          
           free(entry);
         } else { /*si no está*/
           printf("NO ESTA EN CACHE, ARP REQUEST\n");
@@ -218,12 +268,11 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         while(rt_entry!=NULL && (rt_entry->mask.s_addr & senderIP)!=rt_entry->dest.s_addr){
 
         rt_entry=rt_entry->next;
-
+      
         }/*Buscamos entrada en la tabla de ruteo*/
         if(rt_entry!=NULL){
 
-
-          iphdr->ip_src=myInterface->ip;
+          iphdr->ip_src=targetIP;
           iphdr->ip_dst=senderIP;
           iphdr->ip_sum=0;
           iphdr->ip_sum=ip_cksum(iphdr,sizeof(sr_ip_hdr_t));
@@ -233,7 +282,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
           icmp_hdr->icmp_sum= cksum(icmp_hdr,len-sizeof(sr_ip_hdr_t)-sizeof(sr_ethernet_hdr_t));
 
           struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,senderIP);
+      
           if (entry != NULL) {
+
             sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) packet;
             
             struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/
