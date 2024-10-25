@@ -120,13 +120,12 @@ void sr_send_icmp_error_packet(uint8_t type,
     }
     
   }else if(type==11){
-
+    printf("Time exceeded\n");
     unsigned int icmp_pqtLenght=sizeof(sr_icmp_t3_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(sr_ethernet_hdr_t);
     uint8_t *icmp_Packet = malloc(icmp_pqtLenght);
     
-    sr_ip_hdr_t *ip_packet=(sr_ip_hdr_t *)(ipPacket);
     sr_ip_hdr_t *iphdr_icmp= ( sr_ip_hdr_t *)(icmp_Packet+sizeof(sr_ethernet_hdr_t));
-    iphdr_icmp->ip_src=ip_packet->ip_dst;
+    iphdr_icmp->ip_src=iface->ip;
     iphdr_icmp->ip_dst=ipDst;
     iphdr_icmp->ip_ttl=64;/*numero que usa linux*/
     iphdr_icmp->ip_v=4;
@@ -213,23 +212,24 @@ void sr_handle_ip_packet(struct sr_instance *sr,
    if(rt_entry!=NULL){/*SI ENCONTRE PREFIJO TENGO QUE REENVIAR*/
       /*tengo la interfaz de salida del datagrama en iter*/
       /*Disminuir el ttl*/
-      if (iphdr->ip_ttl-1 == 0){
-        struct sr_if *myInterface = sr_get_interface(sr,interface);
-        sr_send_icmp_error_packet(11,0,sr,myInterface->ip,packet + sizeof(sr_ethernet_hdr_t));
+      iphdr->ip_ttl-= 1;
+      iphdr->ip_sum=0;
+      iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t));
+      if (iphdr->ip_ttl == 0){
+
+        /*struct sr_if *myInterface = sr_get_interface(sr,interface);*//*Camibio aca*/
+        printf("Se agotaron los saltos del paquete IP\n");
+        sr_send_icmp_error_packet(11,0,sr,senderIP,packet + sizeof(sr_ethernet_hdr_t));/*Cambie aca*/
         
       } else {
         
         sr_ethernet_hdr_t *ethHdr=(struct sr_ethernet_hdr *)packet;
         struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*Interfaz de salida*/
         struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,targetIP);
-        iphdr->ip_ttl-= 1;
-        iphdr->ip_sum=0;
-        iphdr->ip_sum=ip_cksum(iphdr, sizeof(sr_ip_hdr_t));
-        print_hdrs(packet,len);
+
         if (entry != NULL) { /*si está en la cache*/
           
           printf("ESTA EN CACHE, REENVIO\n");
-
           memcpy(ethHdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
           memcpy(ethHdr->ether_dhost, entry->mac,ETHER_ADDR_LEN);
           ethHdr->ether_type = htons(ethertype_ip);  
@@ -274,9 +274,10 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
           iphdr->ip_src=targetIP;
           iphdr->ip_dst=senderIP;
+          iphdr->ip_ttl=64;
           iphdr->ip_sum=0;
           iphdr->ip_sum=ip_cksum(iphdr,sizeof(sr_ip_hdr_t));
-          iphdr->ip_ttl=64;
+  
           icmp_hdr->icmp_type=0;
           icmp_hdr->icmp_sum=0;
           icmp_hdr->icmp_sum= cksum(icmp_hdr,len-sizeof(sr_ip_hdr_t)-sizeof(sr_ethernet_hdr_t));
