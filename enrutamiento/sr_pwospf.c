@@ -201,9 +201,11 @@ void* pwospf_run_thread(void* arg)
 
 void* check_neighbors_life(void* arg)
 {
-    /* 
-    Cada 1 segundo, chequea la lista de vecinos.
-    */
+    while(1)
+    {
+        usleep(1000000);
+        check_neighbors_alive(g_neighbors);
+    }
     return NULL;
 } /* -- check_neighbors_life -- */
 
@@ -220,13 +222,27 @@ void* check_topology_entries_age(void* arg)
 {
     struct sr_instance* sr = (struct sr_instance*)arg;
 
+    while (1)
+    {
+        usleep(1000000);
+        printf("antes del cambio");
+        print_topolgy_table(g_topology);
+        uint8_t p= check_topology_age(g_topology);
+        if (p == 1) {
+            printf("despues del cambio");
+            print_topolgy_table(g_topology);
+            pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, NULL);
+        }
+
     /* 
+    
     Cada 1 segundo, chequea el tiempo de vida de cada entrada
     de la topologia.
     Si hay un cambio en la topología, se llama a la función de Dijkstra
     en un nuevo hilo.
     Se sugiere también imprimir la topología resultado del chequeo.
     */
+    }
 
     return NULL;
 } /* -- check_topology_entries_age -- */
