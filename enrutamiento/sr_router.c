@@ -183,6 +183,7 @@ void sr_send_icmp_error_packet(uint8_t type,
 
 
   }
+}
 /* 
   * SUGERENCIAS: 
   * - Obtener el cabezal IP y direcciones 
@@ -330,7 +331,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     }
     else if(iphdr->ip_p==89){
 
-      sr_handle_pwospf_packet(sr,packet,len,myInterface)/*Le paso la interfaz por donde llega, revisar*/
+      sr_handle_pwospf_packet(sr,packet,len,myInterface);/*Le paso la interfaz por donde llega, revisar*/
       
     }else{
        printf("Paquete dropeado\n");

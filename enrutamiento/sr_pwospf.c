@@ -418,28 +418,58 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
 {
     /* Obtengo información del paquete recibido */
     /* Imprimo info del paquete recibido*/
-    /*
+    sr_ip_hdr_t *iphdr=( sr_ip_hdr_t *)(packet+sizeof(sr_ethernet_hdr_t));
+    ospfv2_hdr_t* rx_ospfv2_hdr = (ospfv2_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+    ospfv2_hello_hdr_t* rx_ospfv2_hello_hdr =(ospfv2_hello_hdr_t*)(rx_ospfv2_hdr + sizeof(ospfv2_hdr_t)); 
     Debug("-> PWOSPF: Detecting PWOSPF HELLO Packet from:\n");
-    Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id));
-    Debug("      [Neighbor IP = %s]\n", inet_ntoa(neighbor_ip));
-    Debug("      [Network Mask = %s]\n", inet_ntoa(net_mask));
-    */
+    Debug("      [Neighbor ID = %s]\n", inet_ntoa(rx_ospfv2_hdr->rid)); /* cabecera pwospf */
+    Debug("      [Neighbor IP = %s]\n", inet_ntoa(iphdr->ip_src)); /* cabecera ip */
+    Debug("      [Network Mask = %s]\n", inet_ntoa(rx_ospfv2_hello_hdr->nmask));   /* cabecera hello */
+    
 
     /* Chequeo checksum */
-        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");*/
+    
+    if (rx_ospfv2_hdr->csum != ospfv2_cksum(rx_ospfv2_hello_hdr, sizeof(ospfv2_hdr_t)-8)) {
+        Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");
+        return;
+    }
 
     /* Chequeo de la máscara de red */
-        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");*/
+    if (rx_ospfv2_hello_hdr->nmask != rx_if->mask) {
+        Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");
+        return;
+    }
 
     /* Chequeo del intervalo de HELLO */
-        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");*/
-
+    if (rx_ospfv2_hello_hdr->helloint != rx_if->helloint) {
+        Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");
+        return;
+    }
     /* Seteo el vecino en la interfaz por donde llegó y actualizo la lista de vecinos */
-
-    /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces*/
-        /* Recorro todas las interfaces para enviar el paquete LSU */
-        /* Si la interfaz tiene un vecino, envío un LSU */
-
+    rx_if->neighbor_id=rx_ospfv2_hdr->rid; 
+    rx_if->neighbor_ip=iphdr->ip_src;
+    struct ospfv2_neighbor* neighbor=g_neighbors;
+    while (neighbor != NULL && neighbor->neighbor_id.s_addr != rx_if->neighbor_id) {
+        neighbor = neighbor->next;
+    }
+    /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces/
+    / Recorro todas las interfaces para enviar el paquete LSU /
+    / Si la interfaz tiene un vecino, envío un LSU */
+    if (neighbor == NULL) { 
+                                                                    /* revisar */
+        add_neighbor(g_neighbors, create_ospfv2_neighbor((struct in_addr){.s_addr = rx_if->neighbor_id}));
+        struct sr_if* iface=sr->if_list;
+        powspf_hello_lsu_param_t* lsu_param=malloc(sizeof(powspf_hello_lsu_param_t));     
+        lsu_param->sr=sr;
+        while (iface != NULL) {
+            lsu_param->interface=iface;
+            iface=iface->next;
+            send_lsu(lsu_param);
+        } 
+    } else {
+        neighbor->alive=OSPF_NEIGHBOR_TIMEOUT;
+    } 
+        
 } /* -- sr_handle_pwospf_hello_packet -- */
 
 
