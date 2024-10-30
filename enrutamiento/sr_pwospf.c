@@ -36,6 +36,8 @@ pthread_t g_topology_entries_thread;
 pthread_t g_rx_lsu_thread;
 pthread_t g_dijkstra_thread;
 
+pthread_mutex_t g_dijkstra_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 struct in_addr g_router_id;
 uint8_t g_ospf_multicast_mac[ETHER_ADDR_LEN];
 struct ospfv2_neighbor* g_neighbors;
@@ -271,7 +273,6 @@ void* send_hellos(void* arg)
 
         /* Chequeo todas las interfaces para enviar el paquete HELLO */
             /* Cada interfaz matiene un contador en segundos para los HELLO*/
-            /* Crear un hilo para enviar el paquete HELLO */
             /* Reiniciar el contador de segundos para HELLO */
 
         /* Desbloqueo */
@@ -435,8 +436,9 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
 
     /* Seteo el vecino en la interfaz por donde llegó y actualizo la lista de vecinos */
 
-    /* Si es un nuevo vecino, debo enviar un LSU*/
-        /* Creo el hilo para enviar el LSU */
+    /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces*/
+        /* Recorro todas las interfaces para enviar el paquete LSU */
+        /* Si la interfaz tiene un vecino, envío un LSU */
 
 } /* -- sr_handle_pwospf_hello_packet -- */
 
