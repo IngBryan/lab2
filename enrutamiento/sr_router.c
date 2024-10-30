@@ -328,8 +328,12 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
       sr_send_icmp_error_packet(3,3,sr,senderIP,packet+sizeof(sr_ethernet_hdr_t));
     }
-    else{
-      printf("Paquete dropeado\n");
+    else if(iphdr->ip_p==89){
+
+      sr_handle_pwospf_packet(sr,packet,len,myInterface)/*Le paso la interfaz por donde llega, revisar*/
+      
+    }else{
+       printf("Paquete dropeado\n");
     }
 
   }
