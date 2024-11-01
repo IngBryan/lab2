@@ -272,7 +272,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     }
 
 
-  }else{/*es para mi*/
+  }else if(myInterface!=0){/*es para mi*/
     if(iphdr->ip_p==1){/*paquete ICMP*/
       sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
       /*El paquete ya es valido no es necesario chequear cheksum*/
@@ -337,6 +337,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
        printf("Paquete dropeado\n");
     }
 
+  }else if(targetIP==OSPF_AllSPFRouters){
+
+    sr_handle_pwospf_packet(sr,packet,len,myInterface);/*Le paso la interfaz por donde llega, revisar*/
   }
 
 

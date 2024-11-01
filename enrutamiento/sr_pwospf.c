@@ -231,9 +231,14 @@ void* check_topology_entries_age(void* arg)
         print_topolgy_table(g_topology);
         uint8_t p= check_topology_age(g_topology);
         if (p == 1) {
+            dijkstra_param_t dij_param;
+            dij_param.sr=sr;
+            dij_param.mutex=g_dijkstra_mutex;
+            dij_param.rid=g_router_id;
+            dij_param.topology=g_topology;
             printf("despues del cambio");
             print_topolgy_table(g_topology);
-            pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, NULL);
+            pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, &dij_param);
         }
 
     /* 
@@ -270,7 +275,14 @@ void* send_hellos(void* arg)
 
         /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
         pwospf_lock(sr->ospf_subsys);
-
+        struct sr_if* aux_iface=sr->if_list;
+        while(aux_iface!=NULL){
+            powspf_hello_lsu_param_t args;
+            args.interface=aux_iface;
+            args.sr=sr;
+            send_hello_packet(&args);
+            aux_iface->helloint=OSPF_DEFAULT_HELLOINT;
+        }
         /* Chequeo todas las interfaces para enviar el paquete HELLO */
             /* Cada interfaz matiene un contador en segundos para los HELLO*/
             /* Reiniciar el contador de segundos para HELLO */
@@ -296,39 +308,73 @@ void* send_hello_packet(void* arg)
     powspf_hello_lsu_param_t* hello_param = ((powspf_hello_lsu_param_t*)(arg));
 
     Debug("\n\nPWOSPF: Constructing HELLO packet for interface %s: \n", hello_param->interface->name);
-    
+    unsigned int hello_lenght=sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(ospfv2_hdr_t)
+                              +sizeof(ospfv2_hello_hdr_t);
+    uint8_t * packet_hello=malloc(hello_lenght);
+    sr_ethernet_hdr_t * e_hdr=(sr_ethernet_hdr_t *)packet_hello;
+
+   
+    memcpy(e_hdr->ether_dhost, g_ospf_multicast_mac, ETHER_ADDR_LEN);
+    memcpy(e_hdr->ether_shost,hello_param->interface->addr,ETHER_ADDR_LEN);
+    e_hdr->ether_type=ethertype_ip;
     /* Seteo la dirección MAC de multicast para la trama a enviar */
     /* Seteo la dirección MAC origen con la dirección de mi interfaz de salida */
     /* Seteo el ether_type en el cabezal Ethernet */
-
+    sr_ip_hdr_t * ip_hdr=(sr_ip_hdr_t*)(packet_hello+sizeof(sr_ethernet_hdr_t));
+    ip_hdr->ip_len=htons(sizeof(sr_ip_hdr_t)+sizeof(ospfv2_hdr_t)
+                              +sizeof(ospfv2_hello_hdr_t));
+    ip_hdr->ip_hl=5;
+    ip_hdr->ip_v=4;
+    ip_hdr->ip_dst=OSPF_AllSPFRouters;
+    ip_hdr->ip_src=hello_param->interface->ip;
+    ip_hdr->ip_p=89;
+    ip_hdr->ip_id=0;
+    ip_hdr->ip_off=0;
+    ip_hdr->ip_tos=0;
+    ip_hdr->ip_ttl=64;
+    ip_hdr->ip_sum=0;
+    ip_hdr->ip_sum=ip_cksum(ip_hdr,sizeof(sr_ip_hdr_t));
     /* Inicializo cabezal IP */
     /* Seteo el protocolo en el cabezal IP para ser el de OSPF (89) */
     /* Seteo IP origen con la IP de mi interfaz de salida */
     /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
     /* Calculo y seteo el chechsum IP*/
-    
+    ospfv2_hdr_t *p_hdr=(ospfv2_hdr_t*)(ip_hdr+sizeof(sr_ip_hdr_t));
+    p_hdr->aid=0;
+    p_hdr->rid=g_router_id.s_addr;
+    p_hdr->audata=0;
+    p_hdr->autype=0;
+    p_hdr->version=2;
+    p_hdr->type=OSPF_TYPE_HELLO;
+    p_hdr->len=sizeof(ospfv2_hdr_t);
+
     /* Inicializo cabezal de PWOSPF con version 2 y tipo HELLO */
     
     /* Seteo el Router ID con mi ID*/
     /* Seteo el Area ID en 0 */
     /* Seteo el Authentication Type y Authentication Data en 0*/
+    ospfv2_hello_hdr_t *hello_hdr=(ospfv2_hello_hdr_t*)(p_hdr+sizeof(sr_ip_hdr_t));
+    hello_hdr->padding=0;
+    hello_hdr->helloint=OSPF_DEFAULT_HELLOINT;
+    hello_hdr->nmask=hello_param->interface->mask;
+    p_hdr->csum=0;
+    p_hdr->csum=ospfv2_cksum(p_hdr,sizeof(ospfv2_hdr_t)+sizeof(ospfv2_hello_hdr_t));/*Preguntar*/
     /* Seteo máscara con la máscara de mi interfaz de salida */
     /* Seteo Hello Interval con OSPF_DEFAULT_HELLOINT */
     /* Seteo Padding en 0*/
 
     /* Creo el paquete a transmitir */
-   
+    
     /* Calculo y actualizo el checksum del cabezal OSPF */
-
+    sr_send_packet(hello_param->sr,packet_hello,hello_lenght,hello_param->interface->name);
     /* Envío el paquete HELLO */
     /* Imprimo información del paquete HELLO enviado */
-    /*
-    Debug("-> PWOSPF: Sending HELLO Packet of length = %d, out of the interface: %s\n", packet_len, hello_param->interface->name);
+    
+    Debug("-> PWOSPF: Sending HELLO Packet of length = %d, out of the interface: %s\n", hello_lenght, hello_param->interface->name);
     Debug("      [Router ID = %s]\n", inet_ntoa(g_router_id));
-    Debug("      [Router IP = %s]\n", inet_ntoa(ip));
-    Debug("      [Network Mask = %s]\n", inet_ntoa(mask));
-    */
-
+    Debug("      [Router IP = %s]\n", inet_ntoa((struct in_addr ){.s_addr=hello_param->interface->ip}));
+    Debug("      [Network Mask = %s]\n", inet_ntoa((struct in_addr){.s_addr=hello_param->interface->mask}));
+    free(packet_hello);
     return NULL;
 } /* -- send_hello_packet -- */
 
@@ -422,14 +468,14 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     ospfv2_hdr_t* rx_ospfv2_hdr = (ospfv2_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
     ospfv2_hello_hdr_t* rx_ospfv2_hello_hdr =(ospfv2_hello_hdr_t*)(rx_ospfv2_hdr + sizeof(ospfv2_hdr_t)); 
     Debug("-> PWOSPF: Detecting PWOSPF HELLO Packet from:\n");
-    Debug("      [Neighbor ID = %s]\n", inet_ntoa(rx_ospfv2_hdr->rid)); /* cabecera pwospf */
-    Debug("      [Neighbor IP = %s]\n", inet_ntoa(iphdr->ip_src)); /* cabecera ip */
-    Debug("      [Network Mask = %s]\n", inet_ntoa(rx_ospfv2_hello_hdr->nmask));   /* cabecera hello */
+    Debug("      [Neighbor ID = %s]\n", inet_ntoa((struct in_addr ){.s_addr=rx_ospfv2_hdr->rid})); /* cabecera pwospf */
+    Debug("      [Neighbor IP = %s]\n", inet_ntoa((struct in_addr ){.s_addr=iphdr->ip_src})); /* cabecera ip */
+    Debug("      [Network Mask = %s]\n", inet_ntoa((struct in_addr ){.s_addr=rx_ospfv2_hello_hdr->nmask}));   /* cabecera hello */
     
 
     /* Chequeo checksum */
     
-    if (rx_ospfv2_hdr->csum != ospfv2_cksum(rx_ospfv2_hello_hdr, sizeof(ospfv2_hdr_t)-8)) {
+    if (rx_ospfv2_hdr->csum != ospfv2_cksum(rx_ospfv2_hdr, sizeof(ospfv2_hdr_t)+sizeof(ospfv2_hello_hdr_t))) {
         Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");
         return;
     }
