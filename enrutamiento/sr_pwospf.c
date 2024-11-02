@@ -530,7 +530,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
 void* sr_handle_pwospf_lsu_packet(void* arg)
 {
     powspf_rx_lsu_param_t* rx_lsu_param = ((powspf_rx_lsu_param_t*)(arg));
-
+    /*prueba*/
     /* Obtengo el vecino que me envió el LSU*/
     /* Imprimo info del paquete recibido*/
     /*
