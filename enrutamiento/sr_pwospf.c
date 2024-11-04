@@ -531,21 +531,36 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
 {
     powspf_rx_lsu_param_t* rx_lsu_param = ((powspf_rx_lsu_param_t*)(arg));
     /*prueba*/
+
     /* Obtengo el vecino que me envió el LSU*/
     /* Imprimo info del paquete recibido*/
-    /*
+    struct in_addr next_hop_id;
+    next_hop_id.s_addr=rx_lsu_param->rx_if->neighbor_id;
+    struct in_addr next_hop_ip;
+    next_hop_ip.s_addr=rx_lsu_param->rx_if->neighbor_ip;
+
     Debug("-> PWOSPF: Detecting LSU Packet from [Neighbor ID = %s, IP = %s]\n", inet_ntoa(next_hop_id), inet_ntoa(next_hop_ip));
-    */
     
+    ospfv2_hdr_t *hdr_ospf=(ospfv2_hdr_t *)(rx_lsu_param->packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
     /* Chequeo checksum */
-        /*Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");*/
-
+    if(hdr_ospf->csum!=ospfv2_cksum(hdr_ospf),rx_lsu_param->length-(sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t))){
+        Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");
+        return;
+    }
     /* Obtengo el Router ID del router originario del LSU y chequeo si no es mío*/
-        /*Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");*/
+    if(hdr_ospf->rid==g_router_id.s_addr){
 
+        Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");
+        return;
+    }
+    ospfv2_lsu_hdr_t *hdr_lsu =(ospfv2_lsu_hdr_t *)(hdr_ospf+sizeof(ospfv2_hdr_t));
+    struct in_addr source_rid;
+    source_rid.s_addr=hdr_ospf->rid;
     /* Obtengo el número de secuencia y uso check_sequence_number para ver si ya lo recibí desde ese vecino*/
-        /*Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");*/
-
+    if(!check_sequence_number(g_topology,source_rid,hdr_lsu->seq)){
+        Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");
+        return;
+    }    
     /* Itero en los LSA que forman parte del LSU. Para cada uno, actualizo la topología.*/
     /*Debug("-> PWOSPF: Processing LSAs and updating topology table\n");*/        
         /* Obtengo subnet */
