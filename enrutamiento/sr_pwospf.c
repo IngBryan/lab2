@@ -543,15 +543,15 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     
     ospfv2_hdr_t *hdr_ospf=(ospfv2_hdr_t *)(rx_lsu_param->packet+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
     /* Chequeo checksum */
-    if(hdr_ospf->csum!=ospfv2_cksum(hdr_ospf),rx_lsu_param->length-(sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t))){
+    if(hdr_ospf->csum!=ospfv2_cksum(hdr_ospf,rx_lsu_param->length-(sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)))){
         Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");
-        return;
+        return NULL;
     }
     /* Obtengo el Router ID del router originario del LSU y chequeo si no es mío*/
     if(hdr_ospf->rid==g_router_id.s_addr){
 
         Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");
-        return;
+        return NULL;
     }
     ospfv2_lsu_hdr_t *hdr_lsu =(ospfv2_lsu_hdr_t *)(hdr_ospf+sizeof(ospfv2_hdr_t));
     struct in_addr source_rid;
@@ -559,35 +559,75 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     /* Obtengo el número de secuencia y uso check_sequence_number para ver si ya lo recibí desde ese vecino*/
     if(!check_sequence_number(g_topology,source_rid,hdr_lsu->seq)){
         Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");
-        return;
-    }    
+        return NULL;
+    } 
     /* Itero en los LSA que forman parte del LSU. Para cada uno, actualizo la topología.*/
-    /*Debug("-> PWOSPF: Processing LSAs and updating topology table\n");*/        
+    Debug("-> PWOSPF: Processing LSAs and updating topology table\n");    
+    uint32_t number_advertisements =hdr_lsu->num_adv;
+    ospfv2_lsa_t *link=(ospfv2_lsa_t *)(hdr_lsu+sizeof(ospfv2_lsu_hdr_t));/*Primer link lsu*/
+    struct in_addr subnet;
+    struct in_addr mask;
+    struct in_addr rid;
+    
+    while(number_advertisements!=0){
         /* Obtengo subnet */
         /* Obtengo vecino */
+        /*Obtengo mask*/
+        subnet.s_addr=link->subnet;
+        mask.s_addr=link->mask;
+        rid.s_addr=link->rid;        
         /* Imprimo info de la entrada de la topología */
-        /*
-        Debug("      [Subnet = %s]", inet_ntoa(net_num));
-        Debug("      [Mask = %s]", inet_ntoa(net_mask));
-        Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id));
-        */
+        Debug("      [Subnet = %s]", inet_ntoa(subnet));
+        Debug("      [Mask = %s]", inet_ntoa(mask));
+        Debug("      [Neighbor ID = %s]\n", inet_ntoa(rid));
         /* LLamo a refresh_topology_entry*/
-
+        refresh_topology_entry(g_topology,g_router_id,subnet,mask,rid,(struct in_addr){.s_addr=rx_lsu_param->rx_if->neighbor_ip},hdr_lsu->seq);
+        link=link+sizeof(ospfv2_lsa_t);
+        number_advertisements--;
+    }
+               
     /* Imprimo la topología */
-    /*
     Debug("\n-> PWOSPF: Printing the topology table\n");
     print_topolgy_table(g_topology);
-    */
-
 
     /* Ejecuto Dijkstra en un nuevo hilo (run_dijkstra)*/
+    dijkstra_param_t dij_param;
+    dij_param.sr=rx_lsu_param->sr;
+    dij_param.mutex=g_dijkstra_mutex;
+    dij_param.rid=g_router_id;
+    dij_param.topology=g_topology;
+    pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, &dij_param);
 
+    
     /* Flooding del LSU por todas las interfaces menos por donde me llegó */
+    struct sr_if *aux=rx_lsu_param->sr->if_list;
+    sr_ethernet_hdr_t  *hdr_eth=(sr_ethernet_hdr_t*)(rx_lsu_param->packet);
+    sr_ip_hdr_t * hdr_ip=(sr_ip_hdr_t*)(hdr_eth+sizeof(sr_ethernet_hdr_t));
+    hdr_lsu->ttl--;
+    if(hdr_lsu->ttl<=0){/*Ajusto aca el ttl de ospf*/
+        return NULL;
+    }
+    while(aux!=NULL){
+        if(aux->ip!=rx_lsu_param->rx_if->ip){
             /* Seteo MAC de origen */
+            memcpy(hdr_eth->ether_shost, aux->addr, ETHER_ADDR_LEN);
             /* Ajusto paquete IP, origen y checksum*/
+            hdr_ip->ip_src=aux->ip;
+            hdr_ip->ip_dst=aux->neighbor_ip;/*NO ESTOY SEGURO*/
+            hdr_ip->ip_sum=0;
+            hdr_ip->ip_sum=ip_cksum(hdr_ip,sizeof(sr_ip_hdr_t));
             /* Ajusto cabezal OSPF: checksum y TTL*/
+            hdr_ospf->csum=0;
+            hdr_ospf->csum=ospfv2_cksum(hdr_ospf,sizeof(ospfv2_hdr_t)+sizeof(ospfv2_lsu_hdr_t)+((hdr_lsu->num_adv)*sizeof(ospfv2_lsa_t)));
             /* Envío el paquete*/
-            
+            sr_handle_ip_packet(rx_lsu_param->sr,rx_lsu_param->packet,rx_lsu_param->length,hdr_eth->ether_shost,hdr_eth->ether_dhost,rx_lsu_param->rx_if->name,hdr_eth);
+
+        }
+
+        aux=aux->next;
+
+    }
+    
     return NULL;
 } /* -- sr_handle_pwospf_lsu_packet -- */
 
