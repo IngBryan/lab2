@@ -282,6 +282,7 @@ void* send_hellos(void* arg)
             args.sr=sr;
             send_hello_packet(&args);
             aux_iface->helloint=OSPF_DEFAULT_HELLOINT;
+            aux_iface=aux_iface->next;
         }
         /* Chequeo todas las interfaces para enviar el paquete HELLO */
             /* Cada interfaz matiene un contador en segundos para los HELLO*/
@@ -313,10 +314,10 @@ void* send_hello_packet(void* arg)
     uint8_t * packet_hello=malloc(hello_lenght);
     sr_ethernet_hdr_t * e_hdr=(sr_ethernet_hdr_t *)packet_hello;
 
-   
+    
     memcpy(e_hdr->ether_dhost, g_ospf_multicast_mac, ETHER_ADDR_LEN);
     memcpy(e_hdr->ether_shost,hello_param->interface->addr,ETHER_ADDR_LEN);
-    e_hdr->ether_type=ethertype_ip;
+    e_hdr->ether_type=htons(ethertype_ip);
     /* Seteo la dirección MAC de multicast para la trama a enviar */
     /* Seteo la dirección MAC origen con la dirección de mi interfaz de salida */
     /* Seteo el ether_type en el cabezal Ethernet */
@@ -325,7 +326,7 @@ void* send_hello_packet(void* arg)
                               +sizeof(ospfv2_hello_hdr_t));
     ip_hdr->ip_hl=5;
     ip_hdr->ip_v=4;
-    ip_hdr->ip_dst=OSPF_AllSPFRouters;
+    ip_hdr->ip_dst=htonl(OSPF_AllSPFRouters);
     ip_hdr->ip_src=hello_param->interface->ip;
     ip_hdr->ip_p=89;
     ip_hdr->ip_id=0;
@@ -339,23 +340,24 @@ void* send_hello_packet(void* arg)
     /* Seteo IP origen con la IP de mi interfaz de salida */
     /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
     /* Calculo y seteo el chechsum IP*/
-    ospfv2_hdr_t *p_hdr=(ospfv2_hdr_t*)(ip_hdr+sizeof(sr_ip_hdr_t));
+    ospfv2_hdr_t *p_hdr=(ospfv2_hdr_t*)(packet_hello+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
     p_hdr->aid=0;
     p_hdr->rid=g_router_id.s_addr;
     p_hdr->audata=0;
     p_hdr->autype=0;
     p_hdr->version=2;
     p_hdr->type=OSPF_TYPE_HELLO;
-    p_hdr->len=sizeof(ospfv2_hdr_t);
+    p_hdr->len = htons(sizeof(ospfv2_hdr_t) + sizeof(ospfv2_hello_hdr_t));
+
 
     /* Inicializo cabezal de PWOSPF con version 2 y tipo HELLO */
     
     /* Seteo el Router ID con mi ID*/
     /* Seteo el Area ID en 0 */
     /* Seteo el Authentication Type y Authentication Data en 0*/
-    ospfv2_hello_hdr_t *hello_hdr=(ospfv2_hello_hdr_t*)(p_hdr+sizeof(sr_ip_hdr_t));
+    ospfv2_hello_hdr_t *hello_hdr=(ospfv2_hello_hdr_t*)(packet_hello+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(ospfv2_hdr_t));
     hello_hdr->padding=0;
-    hello_hdr->helloint=OSPF_DEFAULT_HELLOINT;
+    hello_hdr->helloint=htons(OSPF_DEFAULT_HELLOINT);
     hello_hdr->nmask=hello_param->interface->mask;
     p_hdr->csum=0;
     p_hdr->csum=ospfv2_cksum(p_hdr,sizeof(ospfv2_hdr_t)+sizeof(ospfv2_hello_hdr_t));/*Preguntar*/
@@ -446,7 +448,7 @@ void* send_lsu(void* arg)
     
     /* La IP destino es la del vecino contectado a mi interfaz*/
     ip_hdr->ip_dst=lsu_param->interface->neighbor_ip;
-    ip_hdr->ip_hl=5; //corregir
+    ip_hdr->ip_hl=5; /*corregir*/
     ip_hdr->ip_v=4;
     ip_hdr->ip_src=lsu_param->interface->ip;
     ip_hdr->ip_p=89;
