@@ -353,7 +353,7 @@ void* send_hello_packet(void* arg)
     /* Seteo el Router ID con mi ID*/
     /* Seteo el Area ID en 0 */
     /* Seteo el Authentication Type y Authentication Data en 0*/
-    ospfv2_hello_hdr_t *hello_hdr=(ospfv2_hello_hdr_t*)(p_hdr+sizeof(sr_ip_hdr_t));
+    ospfv2_hello_hdr_t *hello_hdr=(ospfv2_hello_hdr_t*)(p_hdr+sizeof(ospfv2_hdr_t));
     hello_hdr->padding=0;
     hello_hdr->helloint=OSPF_DEFAULT_HELLOINT;
     hello_hdr->nmask=hello_param->interface->mask;
@@ -407,6 +407,7 @@ void* send_all_lsu(void* arg)
                 args.sr=sr;    
                 send_lsu(&args);
             }
+            aux_iface = aux_iface->next;
         }
         /* Desbloqueo */
         pwospf_unlock(sr->ospf_subsys);
@@ -430,8 +431,9 @@ void* send_lsu(void* arg)
     
     /* Construyo el LSU */
     Debug("\n\nPWOSPF: Constructing LSU packet\n");
+    int routes_count = count_routes(lsu_param->sr);
     unsigned int lsu_lenght=sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(ospfv2_hdr_t)
-                              +sizeof(ospfv2_lsu_hdr_t);
+                              +sizeof(ospfv2_lsu_hdr_t)+routes_count*sizeof(ospfv2_lsa_t);
     /* Creo el paquete y seteo todos los cabezales del paquete a transmitir */
     uint8_t * packet_lsu=malloc(lsu_lenght);
     /* Inicializo cabezal Ethernet */
@@ -464,37 +466,52 @@ void* send_lsu(void* arg)
     p_hdr->autype=0;
     p_hdr->version=2;
     p_hdr->type=OSPF_TYPE_LSU;
-    p_hdr->len=sizeof(ospfv2_hdr_t);
+    p_hdr->len=htons(sizeof(ospfv2_hdr_t)+sizeof(ospfv2_lsu_hdr_t)+routes_count*sizeof(ospfv2_lsa_t));
     
-    ospfv2_lsu_hdr_t *lsu_hdr=(ospfv2_lsu_hdr_t*)(p_hdr+sizeof(sr_ip_hdr_t));
+    ospfv2_lsu_hdr_t *lsu_hdr=(ospfv2_lsu_hdr_t*)(p_hdr+sizeof(ospfv2_hdr_t));
     /* Seteo el número de secuencia y avanzo*/
     lsu_hdr->seq=g_sequence_num+1; //revisar
     /* Seteo el TTL en 64 y el resto de los campos del cabezal de LSU */
     lsu_hdr->ttl=64;
     /* Seteo el número de anuncios con la cantidad de rutas a enviar. Uso función count_routes */
-    lsu_hdr->num_adv=count_routes(lsu_param->sr);
+    lsu_hdr->num_adv=routes_count;
 
     /* Creo cada LSA iterando en las enttadas de la tabla */
     struct sr_rt* rt_entry=lsu_param->sr->routing_table;
+    ospfv2_lsa_t* lsa=(lsu_hdr+sizeof(ospfv2_lsu_hdr_t)); /*apunto al principio de los anuncios*/
     while (rt_entry !=NULL){
         /* Solo envío entradas directamente conectadas y agreagadas a mano*/
         if (rt_entry->admin_dst == 1 || rt_entry->admin_dst == 0){
             /* Creo LSA con subnet, mask y routerID (id del vecino de la interfaz)*/
-            ospfv2_lsa_t lsa;
-            lsa.mask=rt_entry->mask.s_addr;
-            /*lsa.rid= buscarlo*/
-            lsa.subnet=rt_entry->dest.s_addr & rt_entry->mask.s_addr;
+            lsa->mask=rt_entry->mask.s_addr;
+            lsa->rid=sr_get_interface(lsu_param->sr, rt_entry->interface)->neighbor_id;
+            lsa->subnet=rt_entry->dest.s_addr; /*& rt_entry->mask.s_addr;*/
+            lsa=(ospfv2_lsa_t*)(lsa+sizeof(ospfv2_lsa_t)); /*muevo el puntero al siguiente anuncio*/
         }
     }
-        
-        
-
     /* Calculo el checksum del paquete LSU */
+    p_hdr->csum=0;
+    p_hdr->csum=ospfv2_cksum(p_hdr, sizeof(ospfv2_hdr_t)+sizeof(ospfv2_lsu_hdr_t));
+
 
     /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
-    /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
+    struct sr_arpentry* entry=sr_arpcache_lookup(&lsu_param->sr->cache,lsu_param->interface->neighbor_ip);
+    if (entry != NULL){ /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
+        printf("La MAC esta en cache\n");
+        memcpy(e_hdr->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+        sr_send_packet(lsu_param->sr,packet_lsu,lsu_lenght,lsu_param->interface->name);
+        print_hdrs(packet_lsu,lsu_lenght);
+        
+    } else {   
+        printf("La MAC NO esta en cache\n");
+        struct sr_arpreq* req=sr_arpcache_queuereq(&lsu_param->sr->cache, lsu_param->interface->neighbor_ip, packet_lsu, lsu_lenght, lsu_param->interface->name);
+        /*Cambie ip_dst por arp_ip_target */
+        handle_arpreq(&lsu_param->sr->cache, req);
+    }
    
    /* Libero memoria */
+    free(entry);
+    /*ver si hay que liberar algo mas*/
 
     return NULL;
 } /* -- send_lsu -- */
