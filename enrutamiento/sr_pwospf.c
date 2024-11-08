@@ -685,6 +685,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             hdr_ip->ip_src=aux->ip;
             hdr_ip->ip_dst=aux->neighbor_ip;/*NO ESTOY SEGURO*/
             hdr_ip->ip_sum=0;
+            hdr_ip->ip_ttl=64;
             hdr_ip->ip_sum=ip_cksum(hdr_ip,sizeof(sr_ip_hdr_t));
             /* Ajusto cabezal OSPF: checksum y TTL*/
             hdr_ospf->csum=0;
