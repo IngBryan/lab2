@@ -483,7 +483,7 @@ void* send_lsu(void* arg)
 
     /* Creo cada LSA iterando en las enttadas de la tabla */
     struct sr_rt* rt_entry=lsu_param->sr->routing_table;
-    ospfv2_lsa_t* lsa=(packet_lsu+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(ospfv2_hdr_t)+ sizeof(ospfv2_lsu_hdr_t)); /*apunto al principio de los anuncios*/
+    ospfv2_lsa_t* lsa=(ospfv2_lsa_t*)(packet_lsu+sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t)+sizeof(ospfv2_hdr_t)+ sizeof(ospfv2_lsu_hdr_t)); /*apunto al principio de los anuncios*/
     while (rt_entry !=NULL){
         /* Solo envío entradas directamente conectadas y agreagadas a mano*/
         if (rt_entry->admin_dst == 1 || rt_entry->admin_dst == 0){
@@ -491,7 +491,7 @@ void* send_lsu(void* arg)
             lsa->mask=rt_entry->mask.s_addr;
             lsa->rid=sr_get_interface(lsu_param->sr, rt_entry->interface)->neighbor_id; 
             lsa->subnet=rt_entry->dest.s_addr; /*rt_entry->mask.s_addr;*/
-            lsa=(ospfv2_lsa_t*)((uint8_t)(lsa+sizeof(ospfv2_lsa_t))); /*muevo el puntero al siguiente anuncio*/
+            lsa=(ospfv2_lsa_t*)((uint8_t *)lsa+sizeof(ospfv2_lsa_t)); /*muevo el puntero al siguiente anuncio*/
         }
         rt_entry=rt_entry->next;
     }
@@ -512,7 +512,7 @@ void* send_lsu(void* arg)
         printf("La MAC NO esta en cache\n");
         struct sr_arpreq* req=sr_arpcache_queuereq(&lsu_param->sr->cache, lsu_param->interface->neighbor_ip, packet_lsu, lsu_lenght, lsu_param->interface->name);
         /*Cambie ip_dst por arp_ip_target */
-        handle_arpreq(&lsu_param->sr->cache, req);
+        handle_arpreq(lsu_param->sr, req);
     }
    
    /* Libero memoria */
@@ -651,7 +651,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
         Debug("      [Neighbor ID = %s]\n", inet_ntoa(rid));
         /* LLamo a refresh_topology_entry*/
         refresh_topology_entry(g_topology,g_router_id,subnet,mask,rid,(struct in_addr){.s_addr=rx_lsu_param->rx_if->neighbor_ip},hdr_lsu->seq);
-        link=(uint8_t)(link+sizeof(ospfv2_lsa_t));
+        link=(ospfv2_lsa_t *)((uint8_t *)link+sizeof(ospfv2_lsa_t));
         number_advertisements--;
     }
                
@@ -690,16 +690,28 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             hdr_ospf->csum=0;
             hdr_ospf->csum=ospfv2_cksum(hdr_ospf,sizeof(ospfv2_hdr_t)+sizeof(ospfv2_lsu_hdr_t)+((hdr_lsu->num_adv)*sizeof(ospfv2_lsa_t)));
             /* Envío el paquete*/
-            sr_handle_ip_packet(rx_lsu_param->sr,rx_lsu_param->packet,rx_lsu_param->length,hdr_eth->ether_shost,hdr_eth->ether_dhost,rx_lsu_param->rx_if->name,hdr_eth);
+            struct sr_arpentry* entry=sr_arpcache_lookup(&rx_lsu_param->sr->cache,aux->neighbor_ip);
+            struct sr_if* iface=sr_get_interface_given_ip(rx_lsu_param->sr,aux->ip);/*Interfaz de salida*/
+            if (entry != NULL){ /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
+                printf("La MAC esta en cache\n");
+                memcpy(hdr_eth->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+                sr_send_packet(rx_lsu_param->sr,rx_lsu_param->packet,rx_lsu_param->length,iface->name);
+                print_hdrs(rx_lsu_param->packet,rx_lsu_param->length);
+                free(entry);
+            } else {   
+                printf("La MAC NO esta en cache\n");
+                struct sr_arpreq* req=sr_arpcache_queuereq(&rx_lsu_param->sr->cache, aux->ip, rx_lsu_param->packet, rx_lsu_param->length, iface->name);
+                /*Cambie ip_dst por arp_ip_target */
+                handle_arpreq(rx_lsu_param->sr, req);
 
+            }
         }
-
         aux=aux->next;
-
     }
-    
     return NULL;
+    
 } /* -- sr_handle_pwospf_lsu_packet -- */
+
 
 /**********************************************************************************
  * SU CÓDIGO DEBERÍA TERMINAR AQUÍ
