@@ -78,6 +78,7 @@ void sr_send_icmp_error_packet(uint8_t type,
     rt_entry=rt_entry->next;
    }
    printf("Tiene que salir por la siguiente interfaz:\n");
+
    struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/
    struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,ipDst);
 
@@ -118,7 +119,7 @@ void sr_send_icmp_error_packet(uint8_t type,
     sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) icmp_Packet;
     ethHdr->ether_type = htons(ethertype_ip);
     if(entry!=NULL){/*Esta en cache*/
-      printf("La MAC esta en cache\n");
+      printf("La MAC esta en cache sr_send_icmp_error_packet\n");
       
       memcpy(ethHdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
       memcpy(ethHdr->ether_dhost, entry->mac, ETHER_ADDR_LEN);
@@ -127,12 +128,13 @@ void sr_send_icmp_error_packet(uint8_t type,
       free(entry);
       print_hdrs(icmp_Packet,icmp_pqtLenght);
     }else{
-      printf("La MAC NO esta en cache\n");
+      printf("La MAC NO esta en cache sr_send_icmp_error_packet\n");
       struct sr_arpreq* req=sr_arpcache_queuereq(&sr->cache, arp_ip_target, icmp_Packet, icmp_pqtLenght, rt_entry->interface);
       /*Cambie ip_dst por arp_ip_target */
       handle_arpreq(sr, req);
     
     }
+    free(icmp_Packet);
     
   }else if(type==11){
     printf("Time exceeded\n");
@@ -180,8 +182,7 @@ void sr_send_icmp_error_packet(uint8_t type,
       handle_arpreq(sr, req);
     
     }
-
-
+    free(icmp_Packet);
   }
 }
 /* 
@@ -214,10 +215,17 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   
 
   struct sr_if *myInterface = sr_get_interface_given_ip(sr, targetIP);
-  
-  if(myInterface==0){/*hay que reenviar*/
+    
+  if(ntohl(targetIP)==OSPF_AllSPFRouters){
+    printf("SE RECIBIO UN PAQUETE OSPF CON DIRECCION DE MULTICAST\n");
+    struct sr_if * iface=sr_get_interface(sr,interface);
+    sr_handle_pwospf_packet(sr,packet,len,iface);/*Le paso la interfaz por donde llega, revisar*/
 
+  }else if(myInterface==0){/*hay que reenviar*/
    struct sr_rt* rt_entry=sr->routing_table;
+   printf("LA RUTING TABLE ES\n");
+
+   sr_print_routing_table(sr);
    while(rt_entry!=NULL && (rt_entry->mask.s_addr & targetIP)!=rt_entry->dest.s_addr){
 
     rt_entry=rt_entry->next;
@@ -270,8 +278,6 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       sr_send_icmp_error_packet(3,0,sr,senderIP,packet+sizeof(sr_ethernet_hdr_t));
 
     }
-
-
   }else if(myInterface!=0){/*es para mi*/
     if(iphdr->ip_p==1){/*paquete ICMP*/
       sr_icmp_hdr_t *icmp_hdr=(sr_icmp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t)+sizeof(sr_ip_hdr_t));
@@ -330,16 +336,13 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       sr_send_icmp_error_packet(3,3,sr,senderIP,packet+sizeof(sr_ethernet_hdr_t));
     }
     else if(iphdr->ip_p==89){
-
+      printf("SE RECIBIO UN PAQUETE OSPF CON DIRECCION DE MI INTERFAZ\n");
       sr_handle_pwospf_packet(sr,packet,len,myInterface);/*Le paso la interfaz por donde llega, revisar*/
       
     }else{
        printf("Paquete dropeado\n");
     }
 
-  }else if(targetIP==OSPF_AllSPFRouters){
-
-    sr_handle_pwospf_packet(sr,packet,len,myInterface);/*Le paso la interfaz por donde llega, revisar*/
   }
 
 

@@ -236,11 +236,14 @@ void* check_topology_entries_age(void* arg)
             dij_param.mutex=g_dijkstra_mutex;
             dij_param.rid=g_router_id;
             dij_param.topology=g_topology;
+
             printf("despues del cambio");
             print_topolgy_table(g_topology);
             pthread_create(&g_dijkstra_thread, NULL, run_dijkstra, &dij_param);
+        }else{
+            printf("No hubo cambio");
+            print_topolgy_table(g_topology);
         }
-
     /* 
     
     Cada 1 segundo, chequea el tiempo de vida de cada entrada
@@ -280,7 +283,9 @@ void* send_hellos(void* arg)
             powspf_hello_lsu_param_t args;
             args.interface=aux_iface;
             args.sr=sr;
+            printf("Entro hello packet\n");
             send_hello_packet(&args);
+            printf("Salgo hello packet\n");
             aux_iface->helloint=OSPF_DEFAULT_HELLOINT;
             aux_iface=aux_iface->next;
         }
@@ -406,8 +411,10 @@ void* send_all_lsu(void* arg)
             if (aux_iface->neighbor_id != 0){ 
                 powspf_hello_lsu_param_t args;
                 args.interface=aux_iface;
-                args.sr=sr;    
+                args.sr=sr;
+                printf("Entro a send_lsu\n");    
                 send_lsu(&args);
+                printf("Salgo a send_lsu\n");    
             }
             aux_iface = aux_iface->next;
         }
@@ -512,8 +519,11 @@ void* send_lsu(void* arg)
         printf("La MAC NO esta en cache\n");
         struct sr_arpreq* req=sr_arpcache_queuereq(&lsu_param->sr->cache, lsu_param->interface->neighbor_ip, packet_lsu, lsu_lenght, lsu_param->interface->name);
         /*Cambie ip_dst por arp_ip_target */
+
         handle_arpreq(lsu_param->sr, req);
+
     }
+    free(packet_lsu);
    
    /* Libero memoria */
    /*ver si hay que liberar algo mas*/
@@ -535,7 +545,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     /* Imprimo info del paquete recibido*/
     sr_ip_hdr_t *iphdr=( sr_ip_hdr_t *)(packet+sizeof(sr_ethernet_hdr_t));
     ospfv2_hdr_t* rx_ospfv2_hdr = (ospfv2_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
-    ospfv2_hello_hdr_t* rx_ospfv2_hello_hdr =(ospfv2_hello_hdr_t*)(rx_ospfv2_hdr + sizeof(ospfv2_hdr_t)); 
+    ospfv2_hello_hdr_t* rx_ospfv2_hello_hdr =(ospfv2_hello_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)+ sizeof(ospfv2_hdr_t)); 
     Debug("-> PWOSPF: Detecting PWOSPF HELLO Packet from:\n");
     Debug("      [Neighbor ID = %s]\n", inet_ntoa((struct in_addr ){.s_addr=rx_ospfv2_hdr->rid})); /* cabecera pwospf */
     Debug("      [Neighbor IP = %s]\n", inet_ntoa((struct in_addr ){.s_addr=iphdr->ip_src})); /* cabecera ip */
@@ -543,12 +553,11 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     
 
     /* Chequeo checksum */
-    
+
     if (rx_ospfv2_hdr->csum != ospfv2_cksum(rx_ospfv2_hdr, sizeof(ospfv2_hdr_t)+sizeof(ospfv2_hello_hdr_t))) {
         Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");
         return;
     }
-
     /* Chequeo de la máscara de red */
     if (rx_ospfv2_hello_hdr->nmask != rx_if->mask) {
         Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");
@@ -556,14 +565,16 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     }
 
     /* Chequeo del intervalo de HELLO */
-    if (rx_ospfv2_hello_hdr->helloint != rx_if->helloint) {
+    if (ntohs(rx_ospfv2_hello_hdr->helloint) != OSPF_DEFAULT_HELLOINT) {
         Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");
         return;
     }
+
     /* Seteo el vecino en la interfaz por donde llegó y actualizo la lista de vecinos */
     rx_if->neighbor_id=rx_ospfv2_hdr->rid; 
     rx_if->neighbor_ip=iphdr->ip_src;
     struct ospfv2_neighbor* neighbor=g_neighbors;
+
     while (neighbor != NULL && neighbor->neighbor_id.s_addr != rx_if->neighbor_id) {
         neighbor = neighbor->next;
     }
@@ -571,16 +582,22 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     / Recorro todas las interfaces para enviar el paquete LSU /
     / Si la interfaz tiene un vecino, envío un LSU */
     if (neighbor == NULL) { 
-                                                                    /* revisar */
-        add_neighbor(g_neighbors, create_ospfv2_neighbor((struct in_addr){.s_addr = rx_if->neighbor_id}));
+        printf("nuevo vecino\n");                                                        
+        add_neighbor(g_neighbors, create_ospfv2_neighbor((struct in_addr){.s_addr = rx_if->neighbor_id}));/* revisar */
+        pwospf_lock(sr->ospf_subsys);/*Region critica*/
         struct sr_if* iface=sr->if_list;
         powspf_hello_lsu_param_t* lsu_param=malloc(sizeof(powspf_hello_lsu_param_t));     
         lsu_param->sr=sr;
         while (iface != NULL) {
             lsu_param->interface=iface;
+            
+            if(iface->neighbor_id!=0){
+                send_lsu(lsu_param);
+            }
             iface=iface->next;
-            send_lsu(lsu_param);
-        } 
+        }
+        pwospf_unlock(sr->ospf_subsys); /*fin region critica*/
+        free(lsu_param);
     } else {
         neighbor->alive=OSPF_NEIGHBOR_TIMEOUT;
     } 
@@ -629,7 +646,7 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     if(!check_sequence_number(g_topology,source_rid,hdr_lsu->seq)){
         Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");
         return NULL;
-    } 
+    }
     /* Itero en los LSA que forman parte del LSU. Para cada uno, actualizo la topología.*/
     Debug("-> PWOSPF: Processing LSAs and updating topology table\n");    
     uint32_t number_advertisements =hdr_lsu->num_adv;
@@ -678,12 +695,12 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     }
     while(aux!=NULL){
         
-        if(aux->ip!=rx_lsu_param->rx_if->ip){
+        if(aux->ip!=rx_lsu_param->rx_if->ip && aux->neighbor_ip!=0){
             /* Seteo MAC de origen */
             memcpy(hdr_eth->ether_shost, aux->addr, ETHER_ADDR_LEN);
             /* Ajusto paquete IP, origen y checksum*/
             hdr_ip->ip_src=aux->ip;
-            hdr_ip->ip_dst=aux->neighbor_ip;/*NO ESTOY SEGURO*/
+            hdr_ip->ip_dst=aux->neighbor_ip;
             hdr_ip->ip_sum=0;
             hdr_ip->ip_ttl=64;
             hdr_ip->ip_sum=ip_cksum(hdr_ip,sizeof(sr_ip_hdr_t));
@@ -691,16 +708,18 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             hdr_ospf->csum=0;
             hdr_ospf->csum=ospfv2_cksum(hdr_ospf,sizeof(ospfv2_hdr_t)+sizeof(ospfv2_lsu_hdr_t)+((hdr_lsu->num_adv)*sizeof(ospfv2_lsa_t)));
             /* Envío el paquete*/
+
+
             struct sr_arpentry* entry=sr_arpcache_lookup(&rx_lsu_param->sr->cache,aux->neighbor_ip);
             struct sr_if* iface=sr_get_interface_given_ip(rx_lsu_param->sr,aux->ip);/*Interfaz de salida*/
             if (entry != NULL){ /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
-                printf("La MAC esta en cache\n");
+                printf("La MAC esta en cache sr_handle_pwospf_lsu_packet\n");
                 memcpy(hdr_eth->ether_dhost, entry->mac, ETHER_ADDR_LEN);
                 sr_send_packet(rx_lsu_param->sr,rx_lsu_param->packet,rx_lsu_param->length,iface->name);
                 print_hdrs(rx_lsu_param->packet,rx_lsu_param->length);
                 free(entry);
             } else {   
-                printf("La MAC NO esta en cache\n");
+                printf("La MAC NO esta en cache sr_handle_pwospf_lsu_packet\n");
                 struct sr_arpreq* req=sr_arpcache_queuereq(&rx_lsu_param->sr->cache, aux->ip, rx_lsu_param->packet, rx_lsu_param->length, iface->name);
                 /*Cambie ip_dst por arp_ip_target */
                 handle_arpreq(rx_lsu_param->sr, req);
