@@ -183,7 +183,7 @@ void* pwospf_run_thread(void* arg)
 
     pthread_create(&g_hello_packet_thread, NULL, send_hellos, sr);
     pthread_create(&g_all_lsu_thread, NULL, send_all_lsu, sr);
-    pthread_create(&g_neighbors_thread, NULL, check_neighbors_life, NULL);
+    pthread_create(&g_neighbors_thread, NULL, check_neighbors_life, sr);
     pthread_create(&g_topology_entries_thread, NULL, check_topology_entries_age, sr);
 
     return NULL;
@@ -203,10 +203,28 @@ void* pwospf_run_thread(void* arg)
 
 void* check_neighbors_life(void* arg)
 {
+    struct sr_instance* sr = (struct sr_instance*)arg;
+    
     while(1)
     {
         usleep(1000000);
-        check_neighbors_alive(g_neighbors);
+        /*Si hay un cambio, se debe ajustar el neighbor id en la interfaz.*/
+        struct ospfv2_neighbor *result=check_neighbors_alive(g_neighbors);
+        struct sr_if *aux=sr->if_list;
+        while (result!=NULL){
+            
+            while (aux!=NULL && aux->neighbor_id!=result->neighbor_id.s_addr){
+                aux=aux->next;
+            }
+            if(aux!=NULL){
+                aux->neighbor_id=0;
+                aux->neighbor_ip=0;
+            }
+            struct ospfv2_neighbor *resultaux=result;
+            result=result->next;
+            free(resultaux);
+
+        }
     }
     return NULL;
 } /* -- check_neighbors_life -- */
@@ -226,6 +244,7 @@ void* check_topology_entries_age(void* arg)
 
     while (1)
     {
+
         usleep(1000000);
         printf("antes del cambio");
         print_topolgy_table(g_topology);
@@ -509,16 +528,16 @@ void* send_lsu(void* arg)
 
     /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
     struct sr_arpentry* entry=sr_arpcache_lookup(&lsu_param->sr->cache,lsu_param->interface->neighbor_ip);
+
     if (entry != NULL){ /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
-        printf("La MAC esta en cache\n");
+        printf("La MAC esta en cache send_lsu\n");
         memcpy(e_hdr->ether_dhost, entry->mac, ETHER_ADDR_LEN);
         sr_send_packet(lsu_param->sr,packet_lsu,lsu_lenght,lsu_param->interface->name);
         print_hdrs(packet_lsu,lsu_lenght);
         free(entry);
     } else {   
-        printf("La MAC NO esta en cache\n");
+        printf("La MAC NO esta en cache send_lsu\n");
         struct sr_arpreq* req=sr_arpcache_queuereq(&lsu_param->sr->cache, lsu_param->interface->neighbor_ip, packet_lsu, lsu_lenght, lsu_param->interface->name);
-        /*Cambie ip_dst por arp_ip_target */
 
         handle_arpreq(lsu_param->sr, req);
 
@@ -667,7 +686,8 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
         Debug("      [Mask = %s]", inet_ntoa(mask));
         Debug("      [Neighbor ID = %s]\n", inet_ntoa(rid));
         /* LLamo a refresh_topology_entry*/
-        refresh_topology_entry(g_topology,g_router_id,subnet,mask,rid,(struct in_addr){.s_addr=rx_lsu_param->rx_if->neighbor_ip},hdr_lsu->seq);
+
+        refresh_topology_entry(g_topology,g_router_id,subnet,mask,rid,(struct in_addr){.s_addr= rx_lsu_param->rx_if->neighbor_ip},hdr_lsu->seq);
         link=(ospfv2_lsa_t *)((uint8_t *)link+sizeof(ospfv2_lsa_t));
         number_advertisements--;
     }
@@ -687,15 +707,20 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     
     /* Flooding del LSU por todas las interfaces menos por donde me llegó */
     struct sr_if *aux=rx_lsu_param->sr->if_list;
+
     sr_ethernet_hdr_t  *hdr_eth=(sr_ethernet_hdr_t*)(rx_lsu_param->packet);
+
     sr_ip_hdr_t * hdr_ip=(sr_ip_hdr_t*)(rx_lsu_param->packet+sizeof(sr_ethernet_hdr_t));
+
     hdr_lsu->ttl--;
+
     if(hdr_lsu->ttl<=0){/*Ajusto aca el ttl de ospf*/
         return NULL;
     }
+
     while(aux!=NULL){
         
-        if(aux->ip!=rx_lsu_param->rx_if->ip && aux->neighbor_ip!=0){
+        if(aux->ip!=rx_lsu_param->rx_if->ip && aux->neighbor_ip!=0 && aux->neighbor_id!=0){
             /* Seteo MAC de origen */
             memcpy(hdr_eth->ether_shost, aux->addr, ETHER_ADDR_LEN);
             /* Ajusto paquete IP, origen y checksum*/
@@ -706,23 +731,23 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
             hdr_ip->ip_sum=ip_cksum(hdr_ip,sizeof(sr_ip_hdr_t));
             /* Ajusto cabezal OSPF: checksum y TTL*/
             hdr_ospf->csum=0;
+            /*hdr_ospf->rid=g_router_id.s_addr;*/
             hdr_ospf->csum=ospfv2_cksum(hdr_ospf,sizeof(ospfv2_hdr_t)+sizeof(ospfv2_lsu_hdr_t)+((hdr_lsu->num_adv)*sizeof(ospfv2_lsa_t)));
             /* Envío el paquete*/
 
-
             struct sr_arpentry* entry=sr_arpcache_lookup(&rx_lsu_param->sr->cache,aux->neighbor_ip);
-            struct sr_if* iface=sr_get_interface_given_ip(rx_lsu_param->sr,aux->ip);/*Interfaz de salida*/
+            /*struct sr_if* iface=sr_get_interface_given_ip(rx_lsu_param->sr,aux->ip);Interfaz de salida*/
             if (entry != NULL){ /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
                 printf("La MAC esta en cache sr_handle_pwospf_lsu_packet\n");
                 memcpy(hdr_eth->ether_dhost, entry->mac, ETHER_ADDR_LEN);
-                sr_send_packet(rx_lsu_param->sr,rx_lsu_param->packet,rx_lsu_param->length,iface->name);
+                sr_send_packet(rx_lsu_param->sr,rx_lsu_param->packet,rx_lsu_param->length,aux->name);
                 print_hdrs(rx_lsu_param->packet,rx_lsu_param->length);
                 free(entry);
             } else {   
                 printf("La MAC NO esta en cache sr_handle_pwospf_lsu_packet\n");
-                struct sr_arpreq* req=sr_arpcache_queuereq(&rx_lsu_param->sr->cache, aux->ip, rx_lsu_param->packet, rx_lsu_param->length, iface->name);
-                /*Cambie ip_dst por arp_ip_target */
+                struct sr_arpreq* req=sr_arpcache_queuereq(&rx_lsu_param->sr->cache, aux->neighbor_ip, rx_lsu_param->packet, rx_lsu_param->length, aux->name);
                 handle_arpreq(rx_lsu_param->sr, req);
+
 
             }
         }
@@ -746,6 +771,11 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
 
 void sr_handle_pwospf_packet(struct sr_instance* sr, uint8_t* packet, unsigned int length, struct sr_if* rx_if)
 {
+    /*Si aún no terminó la inicialización, se descarta el paquete recibido*/
+    if (g_router_id.s_addr == 0) {
+       return;
+    }
+
     ospfv2_hdr_t* rx_ospfv2_hdr = ((ospfv2_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
     powspf_rx_lsu_param_t* rx_lsu_param = ((powspf_rx_lsu_param_t*)(malloc(sizeof(powspf_rx_lsu_param_t))));
 
@@ -766,7 +796,12 @@ void sr_handle_pwospf_packet(struct sr_instance* sr, uint8_t* packet, unsigned i
             }
             rx_lsu_param->length = length;
             rx_lsu_param->rx_if = rx_if;
-            pthread_create(&g_rx_lsu_thread, NULL, sr_handle_pwospf_lsu_packet, rx_lsu_param);
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+            pthread_t pid;
+            pthread_create(&pid, &attr, sr_handle_pwospf_lsu_packet, rx_lsu_param);
             break;
     }
 } /* -- sr_handle_pwospf_packet -- */
+

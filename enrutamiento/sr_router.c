@@ -13,7 +13,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include "sr_if.h"
 #include "sr_rt.h"
 #include "sr_router.h"
@@ -71,18 +70,21 @@ void sr_send_icmp_error_packet(uint8_t type,
                               uint8_t *ipPacket)
 {
   printf("Se genero un ICMP de error\n");
-  struct sr_rt* rt_entry=sr->routing_table;
 
-   while(rt_entry!=NULL && (rt_entry->mask.s_addr & ipDst)!=rt_entry->dest.s_addr){
+  struct sr_rt* rt_entry=sr->routing_table;
+  printf("LA DIRECCION IP ES %s\n", inet_ntoa((struct in_addr){ipDst}));
+  
+
+  while(rt_entry!=NULL && (rt_entry->mask.s_addr & ipDst)!=rt_entry->dest.s_addr){
 
     rt_entry=rt_entry->next;
-   }
-   printf("Tiene que salir por la siguiente interfaz:\n");
+  }
+  printf("Tiene que salir por la siguiente interfaz:\n");
 
-   struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/
-   struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,ipDst);
+  struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/
+  struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,ipDst);
 
-   uint32_t arp_ip_target = (rt_entry->gw.s_addr == 0) ? ipDst : rt_entry->gw.s_addr;
+  uint32_t arp_ip_target = (rt_entry->gw.s_addr == 0) ? ipDst : rt_entry->gw.s_addr;
 
   sr_print_if(iface);
   if(type==3){/*Port unrachable*/
