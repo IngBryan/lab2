@@ -339,6 +339,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     }
     else if(iphdr->ip_p==89){
       printf("SE RECIBIO UN PAQUETE OSPF CON DIRECCION DE MI INTERFAZ\n");
+      
       sr_handle_pwospf_packet(sr,packet,len,myInterface);/*Le paso la interfaz por donde llega, revisar*/
       
     }else{

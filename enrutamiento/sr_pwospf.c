@@ -686,8 +686,11 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
         Debug("      [Mask = %s]", inet_ntoa(mask));
         Debug("      [Neighbor ID = %s]\n", inet_ntoa(rid));
         /* LLamo a refresh_topology_entry*/
+        /*struct pwospf_topology_entry* first_entry, struct in_addr router_id, struct in_addr net_num, struct in_addr net_mask, 
+        struct in_addr neighbor_id, struct in_addr next_hop, uint16_t sequence_num*/
 
-        refresh_topology_entry(g_topology,g_router_id,subnet,mask,rid,(struct in_addr){.s_addr= rx_lsu_param->rx_if->neighbor_ip},hdr_lsu->seq);
+        refresh_topology_entry(g_topology,(struct in_addr){.s_addr=hdr_ospf->rid},subnet,mask,rid,next_hop_ip,hdr_lsu->seq);
+
         link=(ospfv2_lsa_t *)((uint8_t *)link+sizeof(ospfv2_lsa_t));
         number_advertisements--;
     }
