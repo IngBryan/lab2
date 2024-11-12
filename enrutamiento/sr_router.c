@@ -276,7 +276,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       }
       
     }else{/*SINO MANDAR ICMP NET UNRACHABLE*/
-
+      printf("NO SE ENTURARLO GENERANDO ICMP NET UNREACHABLE\n");
       sr_send_icmp_error_packet(3,0,sr,senderIP,packet+sizeof(sr_ethernet_hdr_t));
 
     }
