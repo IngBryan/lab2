@@ -302,11 +302,14 @@ void* send_hellos(void* arg)
             powspf_hello_lsu_param_t args;
             args.interface=aux_iface;
             args.sr=sr;
-            printf("Entro hello packet\n");
-            send_hello_packet(&args);
-            printf("Salgo hello packet\n");
-            aux_iface->helloint=OSPF_DEFAULT_HELLOINT;
+            if(aux_iface->helloint == 0){
+                send_hello_packet(&args);
+                aux_iface->helloint=OSPF_DEFAULT_HELLOINT;
+            }else {
+                aux_iface->helloint --;
+            }
             aux_iface=aux_iface->next;
+        
         }
         /* Chequeo todas las interfaces para enviar el paquete HELLO */
             /* Cada interfaz matiene un contador en segundos para los HELLO*/
