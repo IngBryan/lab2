@@ -79,6 +79,10 @@ void sr_send_icmp_error_packet(uint8_t type,
 
     rt_entry=rt_entry->next;
   }
+  if(rt_entry==NULL){
+    printf("No supe enrutar el paquete ICMP generado\n");
+    return;
+  }
   printf("Tiene que salir por la siguiente interfaz:\n");
 
   struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/

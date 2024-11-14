@@ -303,7 +303,7 @@ void* send_hellos(void* arg)
             args.interface=aux_iface;
             args.sr=sr;
             if(aux_iface->helloint == 0){
-                pthread_create(&g_hello_packet_thread, &args, send_hello_packet, sr);
+                send_hello_packet (&args);
                 aux_iface->helloint=OSPF_DEFAULT_HELLOINT;
             }else {
                 aux_iface->helloint --;
@@ -434,7 +434,7 @@ void* send_all_lsu(void* arg)
                 powspf_hello_lsu_param_t args;
                 args.interface=aux_iface;
                 args.sr=sr;
-                pthread_create(&g_lsu_thread, &args, send_lsu, sr);
+                send_lsu(&args);
             }
             aux_iface = aux_iface->next;
         }
