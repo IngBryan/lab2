@@ -56,12 +56,20 @@ void sr_send_icmp_error_packet(uint8_t type,
                               uint8_t *ipPacket)
 {
   printf("Se genero un ICMP de error\n");
-  struct sr_rt* rt_entry=sr->routing_table;
+  struct sr_rt* aux=sr->routing_table;
 
-   while(rt_entry!=NULL && (rt_entry->mask.s_addr & ipDst)!=rt_entry->dest.s_addr){
+   struct sr_rt* rt_entry = NULL;  
 
-    rt_entry=rt_entry->next;
-   }
+  while (aux != NULL) {
+   
+    if ((aux->mask.s_addr & ipDst) == aux->dest.s_addr) {
+    
+        if (rt_entry == NULL || rt_entry->mask.s_addr < aux->mask.s_addr) {
+            rt_entry = aux;  
+        }
+    }
+    aux = aux->next; 
+  }
    printf("Tiene que salir por la siguiente interfaz:\n");
    struct sr_if* iface=sr_get_interface(sr,rt_entry->interface);/*interfaz de salida*/
    struct sr_arpentry* entry=sr_arpcache_lookup(&sr->cache,ipDst);
@@ -203,11 +211,19 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   
   if(myInterface==0){/*hay que reenviar*/
 
-   struct sr_rt* rt_entry=sr->routing_table;
-   while(rt_entry!=NULL && (rt_entry->mask.s_addr & targetIP)!=rt_entry->dest.s_addr){
+   struct sr_rt* aux=sr->routing_table;
+   struct sr_rt* rt_entry = NULL;  
 
-    rt_entry=rt_entry->next;
-   }/*Buscamos entrada en la tabla de ruteo*/
+  while (aux != NULL) {
+   
+    if ((aux->mask.s_addr & targetIP) == aux->dest.s_addr) {
+    
+        if (rt_entry == NULL || rt_entry->mask.s_addr < aux->mask.s_addr) {
+            rt_entry = aux;  
+        }
+    }
+    aux = aux->next; 
+  }
    
    if(rt_entry!=NULL){/*SI ENCONTRE PREFIJO TENGO QUE REENVIAR*/
       /*tengo la interfaz de salida del datagrama en iter*/
@@ -264,12 +280,19 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       /*El paquete ya es valido no es necesario chequear cheksum*/
       if(icmp_hdr->icmp_type==8){ /* si es echo request respondo echo reply*/
 
-        struct sr_rt* rt_entry=sr->routing_table;
-        while(rt_entry!=NULL && (rt_entry->mask.s_addr & senderIP)!=rt_entry->dest.s_addr){
+        struct sr_rt* aux=sr->routing_table;
+        struct sr_rt* rt_entry = NULL;  
 
-        rt_entry=rt_entry->next;
-      
-        }/*Buscamos entrada en la tabla de ruteo*/
+        while (aux != NULL) {
+        
+          if ((aux->mask.s_addr & senderIP) == aux->dest.s_addr) {
+          
+            if (rt_entry == NULL || rt_entry->mask.s_addr < aux->mask.s_addr) {
+              rt_entry = aux;  
+            }
+          }
+          aux = aux->next; 
+        }
         if(rt_entry!=NULL){
 
           iphdr->ip_src=targetIP;
